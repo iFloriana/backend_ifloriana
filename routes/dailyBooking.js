@@ -15,14 +15,6 @@ router.get("/", async (req, res) => {
       salon_id,
       status: "check-out"
     }).lean();
-    console.log("Fetched appointments:", appointments.map(a => ({
-      _id: a._id,
-      status: a.status,
-      salon_id: a.salon_id,
-      appointment_date: a.appointment_date,
-      createdAt: a.createdAt,
-      services: a.services?.length
-    })));
 
     const payments = await Payment.find({ salon_id }).lean();
 
@@ -34,16 +26,14 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // Get unique dates with appointments
+    // Prepare summaries
     const dateSet = new Set();
     const summaryMap = {};
 
     for (let appt of appointments) {
-      // Always use UTC date string for grouping (reliable across timezones)
       let dateObj = appt.appointment_date ? new Date(appt.appointment_date) : new Date(appt.createdAt);
       if (isNaN(dateObj)) continue;
 
-      // Get date in UTC (YYYY-MM-DD)
       const dateStr = dateObj.getUTCFullYear() + "-" + String(dateObj.getUTCMonth() + 1).padStart(2, '0') + "-" + String(dateObj.getUTCDate()).padStart(2, '0');
       dateSet.add(dateStr);
 
@@ -56,6 +46,7 @@ router.get("/", async (req, res) => {
           taxAmount: 0,
           tipsEarning: 0,
           additionalDiscount: 0,
+          additionalCharges: 0,
           finalAmount: 0
         };
       }
@@ -66,16 +57,21 @@ router.get("/", async (req, res) => {
       summaryMap[dateStr].servicesCount += appt.services?.length || 0;
       summaryMap[dateStr].serviceAmount += appt.services?.reduce((sum, s) => sum + (s.service_amount || 0), 0);
       summaryMap[dateStr].tipsEarning += payment?.tips || 0;
-      summaryMap[dateStr].additionalDiscount += payment?.additional_discount_value || 0;
+      summaryMap[dateStr].taxAmount += payment?.tax_amount || 0;
+      summaryMap[dateStr].additionalDiscount += payment?.additional_discount || 0;
+
+      // ⛔ Additional charges not found in schema. Update this if added in future.
+      summaryMap[dateStr].additionalCharges += payment?.additional_charges || 0;
 
       summaryMap[dateStr].finalAmount =
         summaryMap[dateStr].serviceAmount +
         summaryMap[dateStr].taxAmount +
-        summaryMap[dateStr].tipsEarning -
+        summaryMap[dateStr].tipsEarning +
+        summaryMap[dateStr].additionalCharges -
         summaryMap[dateStr].additionalDiscount;
     }
 
-    // Auto-fill last 14 days (even if no appointments)
+    // Fill in 14 days back
     const today = new Date();
     for (let i = 0; i < 14; i++) {
       const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
@@ -91,6 +87,7 @@ router.get("/", async (req, res) => {
           taxAmount: 0,
           tipsEarning: 0,
           additionalDiscount: 0,
+          additionalCharges: 0,
           finalAmount: 0
         };
       }

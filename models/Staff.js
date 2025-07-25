@@ -14,10 +14,6 @@ const StaffSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  password: {
-    type: String,
-    required: false,
-  },
   gender: {
     type: String,
     enum: ["male", "female", "other"],
@@ -73,8 +69,13 @@ const StaffSchema = new mongoose.Schema({
       required: true,
     },
   },
+  specialization: {
+    type: String,
+    required: false,
+  },
   assigned_commission_id: {
     type: mongoose.Schema.Types.ObjectId,
+    ref: "RevenueCommission",
     required: false,
   }
 }, { timestamps: true });

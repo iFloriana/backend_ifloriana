@@ -21,10 +21,6 @@ const CustomerSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  password: {
-    type: String,
-    required: false,
-  },
   gender: {
     type: String,
     enum: ["male", "female", "other"],

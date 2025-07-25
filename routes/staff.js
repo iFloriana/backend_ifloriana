@@ -1,6 +1,4 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
 const Staff = require("../models/Staff");
 const Service = require("../models/Service");
 const router = express.Router();
@@ -12,8 +10,6 @@ router.post("/", async (req, res) => {
     full_name,
     email,
     phone_number,
-    password,
-    confirm_password,
     gender,
     branch_id,
     salon_id,
@@ -23,6 +19,7 @@ router.post("/", async (req, res) => {
     show_in_calendar,
     assign_time,
     lunch_time,
+    specialization,
     assigned_commission_id,
   } = req.body;
 
@@ -30,17 +27,11 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ message: "salon_id is required" });
   }
 
-  if (password !== confirm_password) {
-    return res.status(400).json({ message: "Passwords do not match" });
-  }
-
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
     const newStaff = new Staff({
       full_name,
       email,
       phone_number,
-      password: hashedPassword,
       gender,
       branch_id,
       salon_id,
@@ -50,34 +41,12 @@ router.post("/", async (req, res) => {
       show_in_calendar,
       assign_time,
       lunch_time,
+      specialization,
       assigned_commission_id
     });
     await newStaff.save();
 
     res.status(201).json({ message: "Staff created successfully", data: newStaff });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-// Staff Login
-router.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-
-  try {
-    const staff = await Staff.findOne({ email });
-    if (!staff) {
-      return res.status(404).json({ message: "Staff not found" });
-    }
-
-    const isMatch = await bcrypt.compare(password, staff.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    const token = jwt.sign({ id: staff._id }, "secretKey", { expiresIn: "1h" });
-    res.status(201).json({ token, message: "Login successful" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });

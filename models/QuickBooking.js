@@ -55,7 +55,8 @@ const QuickBookingSchema = new mongoose.Schema({
     payment_status: {
         type: String,
         enum: ["Pending", "Paid"],
-        required: true,
+        default: "Pending",
+        required: false,
     },
     salon_id: {
         type: mongoose.Schema.Types.ObjectId,

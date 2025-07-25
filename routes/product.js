@@ -177,6 +177,7 @@ router.patch("/:id/stock", async (req, res) => {
         return res.status(404).json({ message: "Variant not found" });
       }
       variant.stock = Number(variant_stock);
+      product.markModified('variants');
     }
 
     await product.save();

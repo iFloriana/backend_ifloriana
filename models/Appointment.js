@@ -40,7 +40,7 @@ const appointmentSchema = new mongoose.Schema({
         type: Number,
         default: 0
       },
-      used_package: {
+      used_package: { 
         type: Boolean,
         default: false
       },
@@ -75,7 +75,7 @@ const appointmentSchema = new mongoose.Schema({
         required: true
       }
     }
-  ],
+  ], 
   notes: {
     type: String
   },

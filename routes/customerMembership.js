@@ -1,6 +1,6 @@
 const express = require('express');
 const Customer = require('../models/Customer');
-const BranchMembership = require('../models/BranchMembership');
+const BranchMembership = require('../models/branchMembership');
 const CustomerMembership = require('../models/CustomerMembership');
 const upload = require("../utils/upload");
 const router = express.Router();

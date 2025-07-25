@@ -38,4 +38,4 @@ const BranchMembershipSchema = new mongoose.Schema({
     },
 });
 
-module.exports = mongoose.model("BranchMembership", BranchMembershipSchema);
+module.exports = mongoose.models.BranchMembership || mongoose.model("BranchMembership", BranchMembershipSchema);

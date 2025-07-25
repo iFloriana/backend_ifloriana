@@ -7,8 +7,7 @@ const router = express.Router();
 // Create Manager
 router.post("/", async (req, res) => {
   const {
-    first_name,
-    last_name,
+    full_name,
     image,
     email,
     contact_number,
@@ -30,8 +29,7 @@ router.post("/", async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const newManager = new Manager({
-      first_name,
-      last_name,
+      full_name,
       image,
       email,
       contact_number,
@@ -65,9 +63,60 @@ router.post("/login", async (req, res) => {
     }
 
     const token = jwt.sign({ id: manager._id, salon_id: manager.salon_id }, "secretKey", { expiresIn: "1h" });
-    res.status(201).json({ token, message: "Login successful" });
+    // Exclude password from response
+    const managerObj = manager.toObject();
+    delete managerObj.password;
+    res.status(201).json({
+      token,
+      message: "Login successful",
+      manager: managerObj
+    });
   } catch (error) {
     console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// Upgrade existing staff to manager
+router.post("/upgrade/:staffId", async (req, res) => {
+  const { staffId } = req.params;
+  const { password, confirm_password } = req.body;
+
+  if (password !== confirm_password) {
+    return res.status(400).json({ message: "Passwords do not match" });
+  }
+
+  try {
+    const staff = await require("../models/Staff").findById(staffId);
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    const Manager = require("../models/Manager");
+
+    // Check if already upgraded
+    const existingManager = await Manager.findOne({ email: staff.email });
+    if (existingManager) {
+      return res.status(409).json({ message: "Staff already exists as Manager" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const manager = new Manager({
+      full_name: staff.full_name,
+      email: staff.email,
+      contact_number: staff.phone_number,
+      password: hashedPassword,
+      gender: staff.gender,
+      branch_id: staff.branch_id,
+      salon_id: staff.salon_id,
+      image: staff.image || null
+    });
+
+    await manager.save();
+    return res.status(201).json({ message: "Staff upgraded to Manager", data: manager });
+  } catch (error) {
+    console.error("Upgrade error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

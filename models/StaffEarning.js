@@ -38,19 +38,23 @@ const StaffEarningSchema = new mongoose.Schema({
   },
   tip_earning: {
     type: Number,
-    required: true, 
-    default: 0, 
+    required: true,
+    default: 0,
   },
   staff_earning: {
     type: Number,
     required: true,
-    default: 0, 
+    default: 0,
   },
   salon_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Salon",
     required: true,
   },
+  earning_start_date: {
+    type: Date,
+    default: Date.now,
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model("StaffEarning", StaffEarningSchema);

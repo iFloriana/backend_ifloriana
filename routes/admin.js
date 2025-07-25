@@ -59,7 +59,7 @@ router.put('/:id', async (req, res) => {
 
     res.status(200).json({
       message: 'Admin updated successfully',
-      data: updatedAdmin,
+      admin: updatedAdmin,
       salonDetails: salonDetailsFetched,
     });
   } catch (error) {

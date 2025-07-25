@@ -45,12 +45,12 @@ const PaymentSchema = new mongoose.Schema({
   },
   additional_discount_type: {
     type: String,
-    enum: ["percent", "fixed"]
+    enum: ["percentage", "fixed"]
   },
-  additional_discount_value: {
+  additional_charges: {
     type: Number,
     default: 0
-  },
+  }, 
   tax_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Tax"

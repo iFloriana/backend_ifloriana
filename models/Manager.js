@@ -1,11 +1,7 @@
 const mongoose = require("mongoose");
 
 const ManagerSchema = new mongoose.Schema({
-  first_name: {
-    type: String,
-    required: true,
-  },
-  last_name: {
+  full_name: {
     type: String,
     required: true,
   },

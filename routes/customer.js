@@ -3,7 +3,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Customer = require("../models/Customer");
 const BranchPackage = require("../models/BranchPackage");
-const BranchMembership = require("../models/BranchMembership");
+const BranchMembership = require("../models/branchMembership");
 const CustomerPackage = require("../models/CustomerPackage");
 const CustomerMembership = require("../models/CustomerMembership");
 const multer = require("multer");
@@ -40,7 +40,6 @@ router.post("/", upload.single("image"), async (req, res) => {
       full_name,
       email,
       gender,
-      password,
       phone_number,
       status,
       branch_package,
@@ -53,7 +52,6 @@ router.post("/", upload.single("image"), async (req, res) => {
       salon_id,
       full_name,
       gender,
-      password,
       phone_number,
       status,
       image
@@ -160,7 +158,6 @@ router.get("/", async (req, res) => {
 
     try {
         const customers = await Customer.find({ salon_id })
-            .select("-password")
             .populate("salon_id")
             .populate({
                 path: "branch_package",
@@ -213,7 +210,6 @@ router.get("/:id", async (req, res) => {
 
     try {
         const customer = await Customer.findOne({ _id: id, salon_id })
-            .select("-password")
             .populate("salon_id branch_package branch_membership");
 
         if (!customer) {

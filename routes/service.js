@@ -77,6 +77,7 @@ router.get("/", async (req, res) => {
   }
 });
 
+
 // Get Services with salon_id filter
 router.get("/names", async (req, res) => {
   const { salon_id } = req.query;

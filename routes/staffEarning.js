@@ -6,7 +6,7 @@ const Appointment = require("../models/Appointment");
 const Staff = require("../models/Staff");
 const Payment = require("../models/Payment");
 const RevenueCommission = require("../models/RevenueCommission");
-const StaffPayment = require("../models/StaffPayment");
+const StaffPayment = require("../models/StaffPayment"); 
 
 // GET /staff-earning
 router.get("/", async (req, res) => {
@@ -101,7 +101,10 @@ router.get("/", async (req, res) => {
 
       const staff_earning = commission_earning + tip_earning;
 
-      await StaffEarning.findOneAndUpdate(
+      // Keep the old earning_start_date if exists
+      const existing = await StaffEarning.findOne({ staff_id });
+
+      const updatedEarning = await StaffEarning.findOneAndUpdate(
         { staff_id },
         {
           staff_id,
@@ -111,6 +114,7 @@ router.get("/", async (req, res) => {
           commission_earning,
           tip_earning,
           staff_earning,
+          earning_start_date: existing?.earning_start_date || new Date(),
         },
         { upsert: true, new: true }
       );
@@ -124,6 +128,7 @@ router.get("/", async (req, res) => {
         commission_earning,
         tip_earning,
         staff_earning,
+        earning_start_date: updatedEarning.earning_start_date,
       });
     }
 
@@ -225,6 +230,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST /pay/:staff_id
+// POST /pay/:staff_id
 router.post("/pay/:staff_id", async (req, res) => {
   try {
     const { staff_id } = req.params;
@@ -245,7 +251,6 @@ router.post("/pay/:staff_id", async (req, res) => {
     const staff = await Staff.findOne({ _id: staff_id, salon_id });
     if (!staff) return res.status(404).json({ message: "Staff not found" });
 
-    // ⏱️ Fetch appointments for this staff
     const appointments = await Appointment.find({
       status: "check-out",
       salon_id,
@@ -300,11 +305,9 @@ router.post("/pay/:staff_id", async (req, res) => {
       }
     ]);
     tip_earning = tipData[0]?.totalTips || 0;
-    console.log('DEBUG payout:', { staff_id, tipData, tip_earning });
 
     const staff_earning = commission_earning + tip_earning;
 
-    // ✅ Save the payment now
     const payment = new StaffPayment({
       staff_id,
       salon_id,
@@ -316,7 +319,6 @@ router.post("/pay/:staff_id", async (req, res) => {
     });
     await payment.save();
 
-    // ✅ Mark services as paid
     await Appointment.updateMany(
       {
         status: "check-out",
@@ -330,8 +332,20 @@ router.post("/pay/:staff_id", async (req, res) => {
       }
     );
 
-    // ✅ Remove StaffEarning for this staff after payout
-    await StaffEarning.deleteOne({ staff_id, salon_id });
+    // ✅ Reset earnings instead of delete, and update earning_start_date
+    await StaffEarning.findOneAndUpdate(
+      { staff_id, salon_id },
+      {
+        $set: {
+          total_booking: 0,
+          service_amount: 0,
+          commission_earning: 0,
+          tip_earning: 0,
+          staff_earning: 0,
+          earning_start_date: new Date(),
+        }
+      }
+    );
 
     res.status(201).json({ message: "Payment processed successfully", data: payment });
   } catch (error) {
