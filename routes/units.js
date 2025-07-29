@@ -2,7 +2,8 @@ const express = require("express");
 const Branch = require("../models/Branch");
 const Unit = require("../models/Units");
 const Salon = require("../models/Salon");
-const router = express.Router();
+const router = express.Router(); 
+const mongoose = require("mongoose");
 
 // Middleware to validate salon_id
 const validateSalonId = async (req, res, next) => {
@@ -75,9 +76,6 @@ router.get("/", async (req, res) => {
             select: "name" // Only select the name of the branch
         });
 
-        // Filter out units if any of their branches (after population) don't match the salon_id
-        // This check is essentially redundant if we already filter by salon_id in the find({ salon_id })
-        // but kept for robustness if your data might have inconsistencies.
         const filteredUnits = units.filter(unit =>
             unit.branch_id && unit.branch_id.length > 0
         );
@@ -86,6 +84,33 @@ router.get("/", async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+// get units by branch_id
+router.get("/by-branch", async (req, res) => {
+    const { salon_id, branch_id } = req.query;
+
+    if (!salon_id || !branch_id) {
+        return res.status(400).json({ message: "salon_id and branch_id are required" });
+    }
+
+    try {
+        const units = await Unit.find({
+            salon_id: new mongoose.Types.ObjectId(salon_id),
+            branch_id: new mongoose.Types.ObjectId(branch_id)
+        }).populate({
+            path: "branch_id",
+            match: { _id: new mongoose.Types.ObjectId(branch_id) },
+            select: "_id name"
+        });
+
+        const filteredUnits = units.filter(unit => unit.branch_id && unit.branch_id.length > 0);
+
+        res.status(200).json({ message: "Units fetched successfully", data: filteredUnits });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ messgae: "Internal server error" });
     }
 });
 

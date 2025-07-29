@@ -8,7 +8,7 @@ const SalonSchema = new mongoose.Schema({
   image: {
     type: String,
     required: false,
-  },
+  }, 
   description: {
     type: String,
     required: false,

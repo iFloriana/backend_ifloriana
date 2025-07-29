@@ -3,10 +3,14 @@ const ProductCategory = require("../models/ProductCategory");
 const Branch = require("../models/Branch");
 const Brand = require("../models/Brand");
 const router = express.Router();
+const mongoose = require("mongoose");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("productcategory_images");
 
 // Create ProductCategory
-router.post("/", async (req, res) => {
-  const { branch_id, image, name, brand_id, status, salon_id } = req.body;
+router.post("/", upload.single("image"), async (req, res) => {
+  const { branch_id, name, brand_id, status, salon_id } = req.body;
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   if (!salon_id) {
     return res.status(400).json({ message: "salon_id is required" });
@@ -75,6 +79,33 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+ 
+// Get ProductCategories by Branch ID
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const productCategories = await ProductCategory.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id)
+    }).populate({
+      path: "branch_id",
+      match: { _id: new mongoose.Types.ObjectId(branch_id) },
+      select: "_id name"
+    }).populate("brand_id");
+
+    const filteredProductCategories = productCategories.filter(category => category.branch_id && category.branch_id.length > 0);
+
+    res.status(200).json({ message: "Product Categories fetched successfully", data: filteredProductCategories });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error fetching product categories", error });
+  }
+});
 
 // Get Single ProductCategory
 router.get("/:id", async (req, res) => {
@@ -98,7 +129,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update ProductCategory
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const { salon_id, ...updateData } = req.body;
 
@@ -107,10 +138,16 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    if(req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
+
     const updatedProductCategory = await ProductCategory.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
+    
     if (!updatedProductCategory) {
       return res.status(404).json({ message: "ProductCategory not found" });
     }
+    
     res.status(200).json({ message: "ProductCategory updated successfully", data: updatedProductCategory });
   } catch (error) {
     console.error(error);

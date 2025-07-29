@@ -53,6 +53,12 @@ const OrderSchema = new mongoose.Schema({
         enum: ["cash", "card", "upi"],
         required: true
     },
+    staff_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Staff",
+        required: false // Optional
+    },
+
     order_code: {
         type: String,
         unique: true

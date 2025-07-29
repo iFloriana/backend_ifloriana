@@ -1,26 +1,32 @@
 const express = require("express");
 const Salon = require("../models/Salon");
-const multer = require("multer");
-const upload = multer({ dest: "uploads/" });
 const router = express.Router();
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("salon_images");
 
-// Create Salon
+// ------------------- Create Salon -------------------
 router.post("/", upload.single("image"), async (req, res) => {
   if (!req.body || typeof req.body !== "object") {
     return res.status(400).json({ message: "Invalid or missing request body" });
   }
-  const {  ...salonData } = req.body;
-   
+
+  const salonData = { ...req.body };
+
   try {
     if (req.file) {
-      salonData.image = req.file.path;
+      salonData.image = req.file.path.replace(/\\/g, "/"); // ✅ Make path safe for all OS
     }
-    const newSalon = new Salon({  ...salonData });
+
+    const newSalon = new Salon(salonData);
     await newSalon.save();
-    res.status(201).json({ message: "Salon created successfully", data: newSalon });
+
+    res.status(201).json({
+      message: "Salon created successfully",
+      data: newSalon,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Create salon error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -51,24 +57,31 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// Update Salon by _id only
+// ------------------- Update Salon -------------------
 router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const updateData = { ...req.body };
+
   try {
     if (req.file) {
-      updateData.image = req.file.path;
+      updateData.image = req.file.path.replace(/\\/g, "/"); // ✅ Update with new image
     } else if (typeof updateData.image === "undefined" || updateData.image === "") {
-      delete updateData.image;
+      delete updateData.image; // ✅ Prevent overwriting with empty string
     }
+
     const updatedSalon = await Salon.findByIdAndUpdate(id, updateData, { new: true });
+
     if (!updatedSalon) {
       return res.status(404).json({ message: "Salon not found" });
     }
-    res.status(200).json({ message: "Salon updated successfully", data: updatedSalon });
+
+    res.status(200).json({
+      message: "Salon updated successfully",
+      data: updatedSalon,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Update salon error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

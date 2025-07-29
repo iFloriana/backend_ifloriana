@@ -3,9 +3,11 @@ const Staff = require("../models/Staff");
 const Service = require("../models/Service");
 const router = express.Router();
 const mongoose = require("mongoose");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("staff_images");
 
 // Create Staff
-router.post("/", async (req, res) => {
+router.post("/", upload.single("image"), async (req, res) => {
   const {
     full_name,
     email,
@@ -15,13 +17,14 @@ router.post("/", async (req, res) => {
     salon_id,
     service_id,
     status,
-    image,
     show_in_calendar,
     assign_time,
     lunch_time,
     specialization,
     assigned_commission_id,
   } = req.body;
+
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   if (!salon_id) {
     return res.status(400).json({ message: "salon_id is required" });
@@ -63,6 +66,23 @@ router.get("/", async (req, res) => {
 
   try {
     const staff = await Staff.find({ salon_id }).populate("branch_id").populate("service_id");
+    res.status(200).json({ message: "Staff fetched successfully", data: staff });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// get all staff filtered by branch_id
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const staff = await Staff.find({ salon_id, branch_id }).populate("branch_id").populate("service_id");
     res.status(200).json({ message: "Staff fetched successfully", data: staff });
   } catch (error) {
     console.error(error);
@@ -116,7 +136,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update Staff
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const { salon_id, ...updateData } = req.body;
 
@@ -125,6 +145,9 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    if (req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
     const updatedStaff = await Staff.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
     if (!updatedStaff) {
       return res.status(404).json({ message: "Staff not found" });

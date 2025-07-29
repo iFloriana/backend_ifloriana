@@ -2,57 +2,68 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const Manager = require("../models/Manager");
+const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
+const upload = getUploader("manager_images"); // ✅ Specify the folder for branch images
 const router = express.Router();
 
-// Create Manager
-router.post("/", async (req, res) => {
-  const {
-    full_name,
-    image,
-    email,
-    contact_number,
-    password,
-    confirm_password,
-    gender,
-    branch_id,
-    salon_id,
-  } = req.body;
-
-  if (password !== confirm_password) {
-    return res.status(400).json({ message: "Passwords do not match" });
-  }
-
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
-  }
-
+// ------------------- Create Manager -------------------
+router.post("/", upload.single("image"), async (req, res) => {
   try {
+    const {
+      full_name,
+      email,
+      contact_number,
+      password,
+      confirm_password,
+      gender,
+      branch_id,
+      salon_id,
+    } = req.body;
+
+    const image = req.file ? req.file.path : null;
+
+    if (password !== confirm_password) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
+    if (!salon_id) {
+      return res.status(400).json({ message: "salon_id is required" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const newManager = new Manager({
       full_name,
-      image,
       email,
       contact_number,
       password: hashedPassword,
       gender,
       branch_id,
       salon_id,
+      image,
     });
+
     await newManager.save();
 
-    res.status(201).json({ message: "Manager created successfully", data: newManager });
+    res.status(201).json({
+      message: "Manager created successfully",
+      data: newManager,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Create manager error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Manager Login
+// ------------------- Manager Login -------------------
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const manager = await Manager.findOne({ email });
+    const manager = await Manager.findOne({ email }).populate({
+      path: "branch_id",
+      select: "_id name",
+    });
+
     if (!manager) {
       return res.status(404).json({ message: "Manager not found" });
     }
@@ -62,22 +73,27 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    const token = jwt.sign({ id: manager._id, salon_id: manager.salon_id }, "secretKey", { expiresIn: "1h" });
-    // Exclude password from response
+    const token = jwt.sign(
+      { id: manager._id, salon_id: manager.salon_id },
+      "secretKey",
+      { expiresIn: "1h" }
+    );
+
     const managerObj = manager.toObject();
     delete managerObj.password;
-    res.status(201).json({
+
+    res.status(200).json({
       token,
       message: "Login successful",
-      manager: managerObj
+      manager: managerObj,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Login error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Upgrade existing staff to manager
+// ------------------- Upgrade Staff to Manager -------------------
 router.post("/upgrade/:staffId", async (req, res) => {
   const { staffId } = req.params;
   const { password, confirm_password } = req.body;
@@ -87,17 +103,17 @@ router.post("/upgrade/:staffId", async (req, res) => {
   }
 
   try {
-    const staff = await require("../models/Staff").findById(staffId);
+    const Staff = require("../models/Staff");
+    const staff = await Staff.findById(staffId);
     if (!staff) {
       return res.status(404).json({ message: "Staff not found" });
     }
 
-    const Manager = require("../models/Manager");
-
-    // Check if already upgraded
     const existingManager = await Manager.findOne({ email: staff.email });
     if (existingManager) {
-      return res.status(409).json({ message: "Staff already exists as Manager" });
+      return res
+        .status(409)
+        .json({ message: "Staff already exists as Manager" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -110,18 +126,18 @@ router.post("/upgrade/:staffId", async (req, res) => {
       gender: staff.gender,
       branch_id: staff.branch_id,
       salon_id: staff.salon_id,
-      image: staff.image || null
+      image: staff.image || null,
     });
 
     await manager.save();
-    return res.status(201).json({ message: "Staff upgraded to Manager", data: manager });
+    res.status(201).json({ message: "Staff upgraded to Manager", data: manager });
   } catch (error) {
     console.error("Upgrade error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get All Managers
+// ------------------- Get All Managers -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -133,12 +149,12 @@ router.get("/", async (req, res) => {
     const managers = await Manager.find({ salon_id }).populate("branch_id");
     res.status(200).json({ message: "Managers fetched successfully", data: managers });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Fetch managers error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get Single Manager
+// ------------------- Get Single Manager -------------------
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
   const { salon_id } = req.query;
@@ -154,13 +170,13 @@ router.get("/:id", async (req, res) => {
     }
     res.status(200).json({ message: "Manager fetched successfully", data: manager });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Get manager error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Update Manager
-router.put("/:id", async (req, res) => {
+// ------------------- Update Manager -------------------
+router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const { salon_id, ...updateData } = req.body;
 
@@ -169,18 +185,33 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
-    const updatedManager = await Manager.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
+    // ✅ Add image path if a new image is uploaded
+    if (req.file) {
+      updateData.image = req.file.path;
+    }
+
+    const updatedManager = await Manager.findOneAndUpdate(
+      { _id: id, salon_id },
+      updateData,
+      { new: true }
+    );
+
     if (!updatedManager) {
       return res.status(404).json({ message: "Manager not found" });
     }
-    res.status(200).json({ message: "Manager updated successfully", data: updatedManager });
+
+    res.status(200).json({
+      message: "Manager updated successfully",
+      data: updatedManager,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Update manager error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Delete Manager
+
+// ------------------- Delete Manager -------------------
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   const { salon_id } = req.query;
@@ -191,13 +222,16 @@ router.delete("/:id", async (req, res) => {
 
   try {
     const deletedManager = await Manager.findOneAndDelete({ _id: id, salon_id });
+
     if (!deletedManager) {
       return res.status(404).json({ message: "Manager not found" });
     }
+
     res.status(200).json({ message: "Manager deleted successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Delete manager error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
+
 module.exports = router;

@@ -3,6 +3,7 @@ const Tag = require("../models/Tag");
 const Branch = require("../models/Branch");
 const Salon = require("../models/Salon");
 const router = express.Router();
+const mongoose = require("mongoose");
 
 // Middleware to validate salon_id
 const validateSalonId = async (req, res, next) => {
@@ -75,6 +76,31 @@ router.get("/", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const tags = await Tag.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id)
+    }).populate({
+      path: "branch_id",
+      match: { _id: new mongoose.Types.ObjectId(branch_id) },
+      select: "_id name"
+    });
+
+    const filteredTags = tags.filter(tag => tag.branch_id && tag.branch_id.length > 0);
+
+    res.status(200).json({ message: "Tags fetched successfully", data: filteredTags });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
   }
 });
 

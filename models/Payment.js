@@ -45,7 +45,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   additional_discount_type: {
     type: String,
-    enum: ["percentage", "fixed"]
+    enum: ["percentage", "flat"]
   },
   additional_charges: {
     type: Number,

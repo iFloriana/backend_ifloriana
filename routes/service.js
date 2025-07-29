@@ -2,11 +2,12 @@ const express = require("express");
 const Service = require("../models/Service");
 const mongoose = require("mongoose");
 const router = express.Router();
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("service_images");
 
 // Create Service
-router.post("/", async (req, res) => {
+router.post("/", upload.single("image"), async (req, res) => {
   const {
-    image,
     name,
     service_duration,
     regular_price,
@@ -16,6 +17,8 @@ router.post("/", async (req, res) => {
     status,
     salon_id,
   } = req.body;
+
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   if (!salon_id) {
     return res.status(400).json({ message: "salon_id is required" });
@@ -77,7 +80,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-
 // Get Services with salon_id filter
 router.get("/names", async (req, res) => {
   const { salon_id } = req.query;
@@ -120,7 +122,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update Service
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const { salon_id, ...updateData } = req.body;
 
@@ -129,6 +131,9 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    if(req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
     const updatedService = await Service.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
     if (!updatedService) {
       return res.status(404).json({ message: "Service not found" });

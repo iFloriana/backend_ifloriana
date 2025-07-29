@@ -11,7 +11,7 @@ const StaffSchema = new mongoose.Schema({
     unique: true,
   },
   phone_number: {
-    type: String,
+    type: String, 
     required: true,
   },
   gender: {

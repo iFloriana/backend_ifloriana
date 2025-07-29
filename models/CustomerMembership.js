@@ -22,6 +22,11 @@ const CustomerMembershipSchema = new mongoose.Schema({
   },
   end_date: {
     type: Date
+  },
+  branch_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Branch",
+    required: false
   }
 }, { timestamps: true });
 

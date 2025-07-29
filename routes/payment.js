@@ -27,7 +27,7 @@ router.post("/", async (req, res) => {
       coupon_id,
       tax_id,
       additional_discount = 0,
-      additional_discount_type = "fixed",
+      additional_discount_type = "flat",
       tips = 0,
       payment_method,
       additional_charges = 0
@@ -173,7 +173,7 @@ router.post("/", async (req, res) => {
     doc.pipe(fs.createWriteStream(invoicePath));
 
     // Header
-    doc.fontSize(22).text(salon?.name || "Your Salon Name", { align: "center" });
+    doc.fontSize(22).text(salon?.salon_name || "Your Salon Name", { align: "center" });
     doc.fontSize(14).text(branch?.name || "", { align: "center" });
     doc.fontSize(12).text(branch?.address || "", { align: "center" });
     doc.text(`Phone: ${branch?.contact_number || salon?.contact_number || "-"}`, { align: "center" });
@@ -320,6 +320,73 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Server error", error });
   }
 });
+
+// get all payments by salon and branch
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const payments = await Payment.find({ salon_id, branch_id }).populate("salon_id", "name");
+
+    const data = await Promise.all(payments.map(async (p) => {
+      let service_count = 0;
+      let staff_tips = [];
+
+      if (p.appointment_id) {
+        const appointment = await Appointment.findById(p.appointment_id)
+          .select("services")
+          .populate("services.staff_id", "full_name email phone_number image");
+
+        if (appointment && Array.isArray(appointment.services)) {
+          service_count = appointment.services.length;
+
+          const staffMap = {};
+          for (const svc of appointment.services) {
+            if (svc.staff_id && svc.staff_id._id) {
+              staffMap[svc.staff_id._id.toString()] = svc.staff_id;
+            }
+          }
+
+          const staffList = Object.values(staffMap);
+          const tipPerStaff = staffList.length > 0 ? (p.tips || 0) / staffList.length : 0;
+
+          staff_tips = staffList.map(staff => ({
+            _id: staff._id,
+            name: staff.full_name,
+            email: staff.email,
+            phone: staff.phone_number,
+            image: staff.image,
+            tip: Number(tipPerStaff.toFixed(2))
+          }));
+        }
+      }
+
+      const {
+        additional_discount,
+        additional_discount_value, // remove if present
+        ...rest
+      } = p.toObject();
+
+      return {
+        ...rest,
+        additional_discount,
+        invoice_pdf_url: `/api/uploads/invoice-${p._id}.pdf`,
+        service_count,
+        staff_tips
+      };
+    }));
+
+    res.status(200).json({ message: "Branch-wise payments fetched successfully", data });
+  } catch (error) {
+    console.error("Error fetching branch payments:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 
 // ✅ View specific invoice PDF
 router.get("/invoice", async (req, res) => {

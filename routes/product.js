@@ -2,6 +2,9 @@ const express = require("express");
 const router = express.Router();
 const Product = require("../models/Product");
 const Variation = require("../models/Variation");
+const mongoose = require("mongoose");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("product_images");
  
 // Utility to validate that submitted variation values exist in the variation model
 async function validateProductVariations(variationsInput) {
@@ -18,13 +21,13 @@ async function validateProductVariations(variationsInput) {
 }
 
 // Create a new product
-router.post("/", async (req, res) => {
+router.post("/", upload.single("image"), async (req, res) => {
   try {
     const productData = { ...req.body };
 
     // Handle image upload if provided
     if (req.file) {
-      productData.image = req.file.path;
+      productData.image = req.file.path.replace(/\\/g, '/');
     }
 
     // Convert and validate fields
@@ -77,6 +80,39 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Get products by branch ID
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const products = await Product.find({ 
+      salon_id: new mongoose.Types.ObjectId(salon_id), 
+      branch_id: new mongoose.Types.ObjectId(branch_id)
+    })
+      .populate({
+        path: "branch_id",
+        match: { _id: new mongoose.Types.ObjectId(branch_id) },
+        select: "_id name"
+      })
+      .populate("brand_id")
+      .populate("category_id")
+      .populate("tag_id")
+      .populate("unit_id")
+      .populate("variation_id");
+
+    const filteredProducts = products.filter(product => product.branch_id && product.branch_id.length > 0);
+
+    res.status(200).json({ message: "Products fetched successfully", data: filteredProducts });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({ message: "Error fetching products", error });
+  }
+});
+
 // Get all product names and ids
 router.get("/names", async (req, res) => {
   try {
@@ -118,7 +154,7 @@ router.put("/:id", async (req, res) => {
 
     // Handle image upload if provided
     if (req.file) {
-      productData.image = req.file.path;
+      productData.image = req.file.path.replace(/\\/g, '/');
     }
 
     if (productData.has_variations && typeof productData.variations === "string") {

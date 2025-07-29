@@ -1,10 +1,8 @@
 const mongoose = require("mongoose");
-const app = require("./app"); // ✅ Use the configured app
-// Remove redundant express.json and express.urlencoded usage here. They are already set up in app.js
+const app = require("./app");
 const multer = require("multer");
 const path = require("path");
-
-// Remove redundant express.json and express.urlencoded usage here. They are already set up in app.js
+const express = require("express");
 
 // Import routes
 const authRoutes = require("./routes/auth");
@@ -48,8 +46,6 @@ const revenueCommissionRoutes = require("./routes/revenueCommission");
 const staffRevenueRoutes = require("./routes/staffRevenue");
 const staffPaymentsRoutes = require("./routes/staffPayments");
 const orderRoutes = require('./routes/order').router;
-// const statusUpdateRoutes = require('./routes/statusUpdate');
-// const generalRoutes = require("./routes/general");
 
 // Connect to MongoDB
 mongoose.connect("mongodb://localhost:27017/salon_admin")
@@ -86,6 +82,7 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage, fileFilter });
 
 // Apply routes
+app.use("/uploads", express.static("uploads"));
 app.use("/api/auth", authRoutes);
 app.use("/api/package", packageRoutes);
 app.use("/api/admin", adminRoutes);
@@ -127,8 +124,6 @@ app.use("/api/revenue-commissions", revenueCommissionRoutes);
 app.use("/api/staff-revenue", staffRevenueRoutes);
 app.use("/api/staff-payouts", staffPaymentsRoutes);
 app.use("/api/order", orderRoutes);
-// app.use("/api/statusUpdates", statusUpdateRoutes);
-// app.use("/api/general", generalRoutes);
 
 // Start server
 const PORT = 5000;

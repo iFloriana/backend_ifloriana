@@ -4,10 +4,16 @@ const Branch = require("../models/Branch");
 const ProductCategory = require("../models/ProductCategory");
 const Brand = require("../models/Brand");
 const router = express.Router();
+const mongoose = require("mongoose");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("productsubcategory_images");
+
+const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 // Create ProductSubCategory    
-router.post("/", async (req, res) => {
-  const { branch_id, image, product_category_id, brand_id, name, status, salon_id } = req.body;
+router.post("/", upload.single("image"), async (req, res) => {
+  const { branch_id, product_category_id, brand_id, name, status, salon_id } = req.body;
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   if (!salon_id) {
     return res.status(400).json({ message: "salon_id is required" });
@@ -70,6 +76,48 @@ router.get("/", async (req, res) => {
   }
 });
 
+// get product sub categories by branch_id
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "branch_id and salon_id are required" });
+  }
+
+  if (!isValidObjectId(salon_id) || !isValidObjectId(branch_id)) {
+    return res.status(400).json({ message: "Invalid ObjectId in query parameters" });
+  }
+
+  try {
+    const productSubCategories = await ProductSubCategory.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id)
+    })
+      .populate({
+        path: "branch_id",
+        match: { _id: new mongoose.Types.ObjectId(branch_id) },
+        select: "_id name"
+      })
+      .populate("product_category_id")
+      .populate("brand_id");
+
+    const filteredProductSubCategories = productSubCategories.filter(
+      sub => sub.branch_id && sub.branch_id.length > 0
+    );
+
+    return res.status(200).json({
+      message: "Product Sub-Categories fetched successfully",
+      data: filteredProductSubCategories
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({
+      message: "Error fetching product sub-categories",
+      error: error.message
+    });
+  }
+});
+
 // Get Single ProductSubCategory
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
@@ -95,7 +143,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update ProductSubCategory
-router.put("/:id", async (req, res) => {
+router.put("/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
   const { salon_id, ...updateData } = req.body;
 
@@ -104,6 +152,10 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    if(req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
+
     const updatedProductSubCategory = await ProductSubCategory.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
     if (!updatedProductSubCategory) {
       return res.status(404).json({ message: "ProductSubCategory not found" });

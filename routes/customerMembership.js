@@ -125,22 +125,22 @@ router.get('/', async (req, res) => {
 
 // Update Customer Membership
 router.put('/:id', (req, res) => {
-  req.upload.single('image')(req, res, async (err) => {
-    if (err) {
-      return res.status(400).json({ message: 'Image upload failed', error: err.message });
-    }
-    try {
-      let updateData = { ...req.body };
-      if (req.file) {
-        updateData.image = req.file.path;
-      }
-      const updatedMembership = await CustomerMembership.findByIdAndUpdate(req.params.id, updateData, { new: true });
-      if (!updatedMembership) return res.status(404).json({ message: 'Customer membership not found' });
-      res.json({ message: 'Customer membership updated', data: updatedMembership });
-    } catch (error) {
-      res.status(500).json({ message: 'Server error', error });
-    }
-  });
+    req.upload.single('image')(req, res, async (err) => {
+        if (err) {
+            return res.status(400).json({ message: 'Image upload failed', error: err.message });
+        }
+        try {
+            let updateData = { ...req.body };
+            if (req.file) {
+                updateData.image = req.file.path;
+            }
+            const updatedMembership = await CustomerMembership.findByIdAndUpdate(req.params.id, updateData, { new: true });
+            if (!updatedMembership) return res.status(404).json({ message: 'Customer membership not found' });
+            res.json({ message: 'Customer membership updated', data: updatedMembership });
+        } catch (error) {
+            res.status(500).json({ message: 'Server error', error });
+        }
+    });
 });
 
 // Delete customer membership

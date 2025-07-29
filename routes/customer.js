@@ -6,31 +6,9 @@ const BranchPackage = require("../models/BranchPackage");
 const BranchMembership = require("../models/branchMembership");
 const CustomerPackage = require("../models/CustomerPackage");
 const CustomerMembership = require("../models/CustomerMembership");
-const multer = require("multer");
-const path = require("path");
+const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
+const upload = getUploader("customer_images"); // ✅ Specify the folder for branch images
 const router = express.Router();
-
-// Configure multer for image uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, "./uploads");
-    },
-    filename: function (req, file, cb) {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    },
-});
-
-const fileFilter = (req, file, cb) => {
-    const allowedTypes = [".jpg", ".jpeg", ".png"];
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (allowedTypes.includes(ext)) {
-        cb(null, true);
-    } else {
-        cb(new Error("Only .jpg, .jpeg, and .png formats are allowed!"), false);
-    }
-};
-
-const upload = multer({ storage, fileFilter });
 
 // Create Customer
 router.post("/", upload.single("image"), async (req, res) => {
@@ -46,7 +24,7 @@ router.post("/", upload.single("image"), async (req, res) => {
       branch_membership
     } = req.body;
 
-    const image = req.file ? req.file.path : null;
+    const image = req.file ? req.file.path.replace(/\\/g, '/') : null;
 
     let newCustomerData = {
       salon_id,
@@ -124,12 +102,11 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
-
 // Route for creating a customer with image upload
 router.post("/upload", upload.single("image"), async (req, res) => {
     try {
         const { full_name, email, phone_number, gender, status } = req.body;
-        const image = req.file ? req.file.path : null;
+        const image = req.file ? req.file.path.replace(/\\/g, '/') : null;
 
         // Save customer details with the image path
         const newCustomer = await Customer.create({
@@ -223,7 +200,6 @@ router.get("/:id", async (req, res) => {
     }
 });
 
-// PUT update also adds CustomerMembership
 // Update customer
 router.put("/:id", upload.single("image"), async (req, res) => {
     const { id } = req.params;
@@ -237,7 +213,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
         let updateData = { ...req.body };
 
         if (req.file) {
-            updateData.image = req.file.path;
+            updateData.image = req.file.path.replace(/\\/g, "/");
         }
 
         // Optional: Branch Package

@@ -14,7 +14,7 @@ const upload = multer({ storage });
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken"); 
+const jwt = require("jsonwebtoken");
 const Admin = require("../models/Admin");
 const SuperAdminPackage = require("../models/SuperAdminPackage");
 const Salon = require("../models/Salon");
@@ -103,6 +103,9 @@ router.post("/signup", async (req, res) => {
     let packageExpirationDate = new Date(packageStartDate);
 
     switch (packageExists.subscription_plan) {
+      case "15-days": 
+        packageExpirationDate.setDate(packageExpirationDate.getDate() + 15);
+        break;
       case "1-month":
         packageExpirationDate.setMonth(packageExpirationDate.getMonth() + 1);
         break;
@@ -175,7 +178,6 @@ router.post("/signup", async (req, res) => {
   }
 });
 
-
 // Check Admin Package Status
 router.get("/check-package-status", async (req, res) => {
   const { email } = req.query;
@@ -232,18 +234,15 @@ router.post("/login", async (req, res) => {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    // Debugging logs to check password values
-    console.log("Password from request:", password);
-    console.log("Hashed password from database:", admin ? admin.password : null);
-
-    // Ensure both passwords are defined before comparing
-    if (!password || !admin || !admin.password) {
-      return res.status(400).json({ message: "Invalid credentials" });
+    // check if package is expired
+    const now = new Date();
+    if (admin.package_expiration_date && now > new Date(admin.package_expiration_date)) {
+      return res.status(403).json({ message: "Your package has expired. Please renew to login." });
     }
 
     const isMatch = await bcrypt.compare(password, admin.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid Credentials" });
+      return res.status(400).json({ message: "Invalid Credentails" });
     }
 
     const salon = await Salon.findOne({ signup_id: admin._id });
@@ -253,7 +252,7 @@ router.post("/login", async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "Login successful",
+      messgae: "Login successful",
       token,
       full_name: admin.full_name,
       email: admin.email,
@@ -266,6 +265,66 @@ router.post("/login", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// auto renew admin package
+router.post("/renew-package", async (req, res) => {
+  const { admin_id, package_id } = req.body;
+
+  if (!admin_id || !package_id) {
+    return res.status(400).json({ message: "Admin ID and package ID are required" });
+  }
+
+  try {
+    const admin = await Admin.finfById(admin_id);
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    const seletedPackage = await SuperAdminPackage.findById(package_id);
+    if (!seletedPackage) {
+      return res.status(404).json({ message: "Package not found" });
+    }
+
+    const now = new Date();
+    let newExpiration = new Date(now);
+
+    switch (seletedPackage.subscription_plan) {
+      case "15-days":
+        newExpiration.setDate(newExpiration.getDate() + 15);
+        break;  
+      case "1-month":
+        newExpiration.setMonth(newExpiration.getMonth() + 1);
+        break;
+      case "3-months":
+        newExpiration.setMonth(newExpiration.getMonth() + 3);
+        break;
+      case "6-months":
+        newExpiration.setMonth(newExpiration.getMonth() + 6);
+        break;
+      case "1-year":
+        newExpiration.setFullYear(newExpiration.getFullYear() + 1);
+        break;
+      default:  
+      return res.status(400).json({ message: "Invalid subscription plan" });
+    }
+
+    admin.package_id = selectedPackage._id;
+    admin.package_start_date = now;
+    admin.package_expiration_date = newExpiration;
+
+    await admin.save();
+
+    res.status(200).json({
+      message: "Package renewed successfully",
+      admin_id: admin._id,
+      new_package: selectedPackage.package_name,
+      package_expiration_date: admin.package_expiration_date,
+    });
+  } catch (error) {
+    console.error("Error renewing package: ", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

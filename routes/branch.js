@@ -1,11 +1,11 @@
 const express = require("express");
 const Branch = require("../models/Branch");
-const router = express.Router();
 const Staff = require("../models/Staff");
-const multer = require("multer");
-const upload = multer({ dest: "uploads/" });
+const router = express.Router();
+const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
+const upload = getUploader("branch_images"); // ✅ Specify the folder for branch images
 
-// Create Branch with salon_id validation
+// ------------------- POST: Create Branch -------------------
 router.post("/", upload.single("image"), async (req, res) => {
   const { salon_id } = req.body;
 
@@ -14,19 +14,56 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 
   try {
-    let branchData = { ...req.body };
+    const branchData = { ...req.body };
+
+    // ✅ Set image path if image is uploaded
     if (req.file) {
-      branchData.image = req.file.path;
+      branchData.image = req.file.path.replace(/\\/g, "/");
     }
+
     const newBranch = new Branch(branchData);
     await newBranch.save();
-    res.status(201).json({ message: "Branch created successfully", data: newBranch });
+
+    res.status(201).json({
+      message: "Branch created successfully",
+      data: newBranch,
+    });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error });
+    console.error("Create branch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get All Branches with salon_id filter
+
+// ------------------- PUT: Update Branch -------------------
+router.put("/:id", upload.single("image"), async (req, res) => {
+  try {
+    const updateData = { ...req.body };
+
+    // ✅ Set new image path if uploaded
+    if (req.file) {
+      updateData.image = req.file.path.replace(/\\/g, "/");
+    }
+
+    const updatedBranch = await Branch.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
+
+    if (!updatedBranch) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
+
+    res.json({ message: "Branch updated", data: updatedBranch });
+  } catch (error) {
+    console.error("Update branch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+
+// ------------------- GET: All Branches -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -37,9 +74,14 @@ router.get("/", async (req, res) => {
   try {
     const branches = await Branch.find({ salon_id })
       .populate("salon_id")
-      .populate("service_id");
+      .populate({
+        path: "service_id",
+        populate: {
+          path: "category_id",
+          select: "_id name",
+        },
+      });
 
-    // Get staff counts grouped by branch_id
     const staffCounts = await Staff.aggregate([
       {
         $group: {
@@ -49,28 +91,28 @@ router.get("/", async (req, res) => {
       },
     ]);
 
-    // Map branchId => count
     const countMap = {};
     staffCounts.forEach(({ _id, count }) => {
-      if (_id) {
-        countMap[_id.toString()] = count;
-      }
+      if (_id) countMap[_id.toString()] = count;
     });
 
-    // Attach staff_count to each branch
     const branchData = branches.map((branch) => ({
       ...branch.toObject(),
-      staff_count: branch._id ? countMap[branch._id.toString()] || 0 : 0,
+      staff_count: countMap[branch._id.toString()] || 0,
     }));
 
-    res.status(200).json({ message: "Branches fetched successfully", data: branchData });
+    res.status(200).json({
+      message: "Branches fetched successfully",
+      data: branchData,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Fetch branches error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get Branch Names and IDs by Salon ID
+
+// ------------------- GET: Branch Names -------------------
 router.get("/names", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -79,15 +121,19 @@ router.get("/names", async (req, res) => {
   }
 
   try {
-    const branchNamesAndIds = await Branch.find({ salon_id }, { name: 1 });
-    res.status(200).json({ message: "Branch names and IDs fetched successfully", data: branchNamesAndIds });
+    const branchNames = await Branch.find({ salon_id }, { name: 1 });
+    res.status(200).json({
+      message: "Branch names and IDs fetched successfully",
+      data: branchNames,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Fetch branch names error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get Single Branch
+
+// ------------------- GET: Single Branch -------------------
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -100,50 +146,37 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Branch not found" });
     }
 
-    // Count staff members assigned to this branch
     const staffCount = await Staff.countDocuments({ branch_id: id });
 
-    const branchData = {
-      ...branch.toObject(),
-      staff_count: staffCount,
-    };
-
-    res.status(200).json({ message: "Branch fetched successfully", data: branchData });
+    res.status(200).json({
+      message: "Branch fetched successfully",
+      data: {
+        ...branch.toObject(),
+        staff_count: staffCount,
+      },
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Fetch branch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
 
-// Update Branch
-router.put("/:id", upload.single("image"), async (req, res) => {
-  try {
-    let updateData = { ...req.body };
-    if (req.file) {
-      updateData.image = req.file.path;
-    }
-    const updatedBranch = await Branch.findByIdAndUpdate(req.params.id, updateData, { new: true });
-    if (!updatedBranch) return res.status(404).json({ message: "Branch not found" });
-    res.json({ message: "Branch updated", data: updatedBranch });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error });
-  }
-});
-
-// Delete Branch
+// ------------------- DELETE: Branch -------------------
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
 
   try {
     const deletedBranch = await Branch.findByIdAndDelete(id);
+
     if (!deletedBranch) {
       return res.status(404).json({ message: "Branch not found" });
     }
+
     res.status(200).json({ message: "Branch deleted successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    console.error("Delete branch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

@@ -3,7 +3,8 @@ const express = require("express");
 const Tax = require("../models/Tax");
 const Branch = require("../models/Branch");
 const Salon = require("../models/Salon");
-const router = express.Router();
+const router = express.Router(); 
+const mongoose = require("mongoose");
 
 // Middleware to validate salon_id
 const validateSalonId = async (req, res, next) => {
@@ -66,10 +67,38 @@ router.get("/", async (req, res) => {
     }
 });
 
+// get all taxes filetred by branch_id
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const taxes = await Tax.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id) // filter array contains
+    }).populate({
+      path: "branch_id",
+      match: { _id: new mongoose.Types.ObjectId(branch_id) }, // only populate the matching branch
+      select: "_id name"
+    });
+
+    // 🧼 Optional: Remove empty `branch_id` arrays if no match was populated
+    const filteredTaxes = taxes.filter(tax => tax.branch_id.length > 0);
+
+    res.status(200).json({ message: "Taxes fetched successfully", data: filteredTaxes });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Get Single Tax
 router.get("/:id", async (req, res) => {
     const { id } = req.params;
-    const { salon_id } = req.query;
+    const { salon_id } = req.query; 
 
     try {
         const tax = await Tax.findOne({ _id: id, salon_id: salon_id }).populate("branch_id");

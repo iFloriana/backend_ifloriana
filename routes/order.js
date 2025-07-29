@@ -13,8 +13,7 @@ function generateOrderInvoicePDF(invoice, order_code) {
   const filePath = path.join(__dirname, "../uploads", fileName);
   const stream = fs.createWriteStream(filePath);
   doc.pipe(stream);
-
-  // Header
+  //-------------------------------- Header --------------------------------   
   const salon = invoice.salon || {};
   const branch = invoice.branch || {};
   doc.fontSize(22).font("Helvetica-Bold").text(salon.salon_name || "-", { align: "center" });
@@ -41,6 +40,12 @@ function generateOrderInvoicePDF(invoice, order_code) {
   doc.font("Helvetica-Bold").text(`Customer: `, { continued: true }).font("Helvetica").text(customer.full_name || customer.name || "-");
   doc.font("Helvetica-Bold").text(`Phone: `, { continued: true }).font("Helvetica").text(customer.phone_number || "-", { continued: false });
   doc.font("Helvetica-Bold").text(`Date: `, { continued: true }).font("Helvetica").text(new Date(invoice.createdAt).toLocaleString());
+  
+  if (invoice.staff) {
+    const staffName = invoice.staff.full_name || invoice.staff.name || "-";
+    doc.font("Helvetica-Bold").text(`Staff: `, { continued: true }).font("Helvetica").text(staffName);
+  }
+  
   doc.moveDown(1);
 
   // Products Section
@@ -104,7 +109,6 @@ function generateOrderInvoicePDF(invoice, order_code) {
   });
 }
 
-
 // Helper to build invoice object for an order
 function buildOrderInvoice(order) {
   return {
@@ -122,7 +126,8 @@ function buildOrderInvoice(order) {
       quantity: p.quantity,
       unit_price: p.unit_price,
       total_price: p.total_price
-    }))
+    })),
+    ...(order.staff_id ? { staff: order.staff_id } : {}) //conditionally include staff
   };
 }
 const express = require("express");
@@ -133,12 +138,16 @@ const Product = require("../models/Product");
 // POST: Create a new order (buy products)
 router.post("/", async (req, res) => {
   try {
-    const { salon_id, branch_id, products, customer_id, payment_method } = req.body;
+    const { salon_id, branch_id, products, customer_id, payment_method, staff_id } = req.body;
+
     if (!salon_id || !branch_id || !Array.isArray(products) || products.length === 0 || !customer_id || !payment_method) {
       return res.status(400).json({ message: "Missing required fields or products array is empty" });
     }
+
     let total_price = 0;
+
     const orderProducts = [];
+
     for (const item of products) {
       const { product_id, variant_id, quantity } = item;
       const qty = parseInt(quantity);
@@ -157,7 +166,7 @@ router.post("/", async (req, res) => {
             return res.status(400).json({ message: `Not enough stock for variant of product: ${product_id}` });
           }
           variant.stock -= qty;
-        } 
+        }
       } else {
         unit_price = product.price;
         if (product.stock !== undefined) {
@@ -167,30 +176,38 @@ router.post("/", async (req, res) => {
           product.stock -= qty;
         }
       }
+
       const line_total = unit_price * qty;
       total_price += line_total;
       orderProducts.push({ product_id, variant_id: variant_id || null, quantity: qty, unit_price, total_price: line_total });
       await product.save();
     }
+
     const order = new Order({
       salon_id,
       branch_id,
       products: orderProducts,
       customer_id,
       total_price,
-      payment_method
+      payment_method,
+      staff_id,
     });
     await order.save();
+
     // Populate for invoice
     await order.populate([
       { path: "salon_id" },
       { path: "branch_id" },
       { path: "customer_id" },
+      { path: "staff_id" },
       { path: "products.product_id" },
       { path: "products.variant_id" }
     ]);
+
     const invoice = buildOrderInvoice(order);
+
     const pdfFileName = await generateOrderInvoicePDF(invoice, order.order_code);
+
     res.status(201).json({
       message: "Order created successfully",
       order_code: order.order_code,
@@ -207,37 +224,96 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const { salon_id, customer_id } = req.query;
+
     if (!salon_id) {
       return res.status(400).json({ message: "salon_id is required" });
     }
+
     const filter = { salon_id };
+
     if (customer_id) filter.customer_id = customer_id;
+
     const orders = await Order.find(filter)
       .populate("products.product_id")
       .populate("products.variant_id")
       .populate("customer_id")
-      .populate("branch_id");
+      .populate("branch_id")
+      .populate("staff_id");
+
     // Add productCount to each order
     const ordersWithProductCount = await Promise.all(orders.map(async order => {
       const obj = order.toObject();
       obj.productCount = obj.products ? obj.products.length : 0;
       obj.order_code = order.order_code;
+
       // Populate for invoice
       await order.populate([
         { path: "salon_id" },
         { path: "branch_id" },
         { path: "customer_id" },
+        { path: "staff_id" },
         { path: "products.product_id" },
         { path: "products.variant_id" }
       ]);
+
       obj.invoice = buildOrderInvoice(order);
+
       // Generate PDF for each order (optional: comment out if not needed for all)
       obj.invoice_pdf_url = `/api/uploads/invoice-${order.order_code}.pdf`;
       return obj;
     }));
+
     res.status(200).json({ success: true, data: ordersWithProductCount });
   } catch (error) {
     res.status(500).json({ message: "Error fetching orders", error: error.message });
+  }
+});
+
+// get orders by branch_id
+router.get("/by-branch", async (req, res) => {
+  try {
+    const { salon_id, branch_id } = req.query;
+
+    if (!salon_id || !branch_id) {
+      return res.status(400).json({ messsage: "salon_id and branch_id are required" });
+    }
+
+    const filter = {
+      salon_id,
+      branch_id
+    };
+
+    const orders = await Order.find(filter)
+      .populate("products.product_id")
+      .populate("products.variant_id")
+      .populate("customer_id")
+      .populate("branch_id")
+      .populate("salon_id")
+      .populate("staff_id");
+
+    const ordersWithInvoices = await Promise.all(orders.map(async order => { 
+      const obj = order.toObject();
+      obj.ProductCount = obj.products ? obj.products.length : 0;
+      obj.order_code = order.order_code;
+
+      await order.populate([
+        { path: "salon_id" },
+        { path: "branch_id" },
+        { path: "customer_id" },
+        { path: "staff_id" },
+        { path: "products.product_id" },
+        { path: "products.variant_id" },
+      ]);
+
+      obj.invoice = buildOrderInvoice(order);
+      obj.invoice_pdf_url = `/api/uploads/invoice=${order.order_code}.pdf`;
+      return obj;
+    }));
+
+    res.status(200).json({ success: true, data: ordersWithInvoices });
+
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching orders by branch", error: error.message });
   }
 });
 
@@ -245,25 +321,33 @@ router.get("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const order = await Order.findById(id)
       .populate("products.product_id")
       .populate("products.variant_id")
       .populate("customer_id")
       .populate("branch_id")
-      .populate("salon_id");
+      .populate("salon_id")
+      .populate("staff_id");
+
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
+
     // Populate for invoice
     await order.populate([
       { path: "salon_id" },
       { path: "branch_id" },
       { path: "customer_id" },
+      { path: "staff_id" },
       { path: "products.product_id" },
       { path: "products.variant_id" }
     ]);
+
     const invoice = buildOrderInvoice(order);
+
     const pdfFileName = `/api/uploads/invoice-${order.order_code}.pdf`;
+
     res.status(200).json({
       success: true,
       order_code: order.order_code,
@@ -280,14 +364,18 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const { quantity, variant_id } = req.body;
+
     const order = await Order.findById(id);
+
     if (!order) return res.status(404).json({ message: "Order not found" });
     if (quantity) {
       const qty = parseInt(quantity);
       if (isNaN(qty) || qty < 1) {
         return res.status(400).json({ message: "Invalid quantity" });
       }
+
       order.quantity = qty;
       // Recalculate total_price
       let unit_price = order.unit_price;
@@ -300,8 +388,10 @@ router.put("/:id", async (req, res) => {
         order.variant_id = variant_id;
         order.unit_price = unit_price;
       }
+
       order.total_price = order.unit_price * order.quantity;
     }
+
     await order.save();
     await order.populate([
       { path: "salon_id" },
@@ -310,8 +400,11 @@ router.put("/:id", async (req, res) => {
       { path: "products.product_id" },
       { path: "products.variant_id" }
     ]);
+
     const invoice = buildOrderInvoice(order);
+
     const pdfFileName = await generateOrderInvoicePDF(invoice, order.order_code);
+
     res.status(200).json({
       message: "Order updated successfully",
       order_code: order.order_code,
@@ -328,8 +421,11 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const deleted = await Order.findByIdAndDelete(id);
+
     if (!deleted) return res.status(404).json({ message: "Order not found" });
+
     res.status(200).json({ message: "Order deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Error deleting order", error: error.message });

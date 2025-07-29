@@ -27,22 +27,35 @@ function calculatePackagePrice(package_details) {
 // Create with enhanced validation
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-    let { 
+    let {
       branch_id,
       package_name,
       description,
       start_date,
       end_date,
       package_details,
-      salon_id
+      salon_id,
     } = req.body;
 
-    // Validate required fields
-    if (!branch_id || !package_name || !salon_id) {
-      return res.status(400).json({ message: "branch_id, package_name and salon_id are required" });
+    // Ensure branch_id is an array
+    if (!Array.isArray(branch_id)) {
+      try {
+        branch_id = JSON.parse(branch_id); // Handle if sent as stringified array
+      } catch (err) {
+        return res.status(400).json({ message: "branch_id must be an array or JSON string" });
+      }
     }
 
-    // Parse package_details if it's a string
+    // Validate salon_id and each branch_id
+    if (
+      !mongoose.Types.ObjectId.isValid(salon_id) ||
+      !Array.isArray(branch_id) ||
+      branch_id.some(id => !mongoose.Types.ObjectId.isValid(id))
+    ) {
+      return res.status(400).json({ message: "Invalid salon_id or branch_id" });
+    }
+
+    // Handle package_details if stringified
     if (typeof package_details === "string") {
       try {
         package_details = JSON.parse(package_details);
@@ -51,48 +64,28 @@ router.post("/", upload.single("image"), async (req, res) => {
       }
     }
 
-    // Validate package_details structure
-    if (!Array.isArray(package_details)) {
-      return res.status(400).json({ message: "package_details must be an array" });
-    }
-
-    // Validate each service in package_details
-    for (const detail of package_details) {
-      if (!detail.service_id || !mongoose.isValidObjectId(detail.service_id)) {
-        return res.status(400).json({ message: "Invalid service_id in package_details" });
-      }
-      
-      const serviceExists = await Service.exists({ _id: detail.service_id });
-      if (!serviceExists) {
-        return res.status(400).json({ message: `Service not found: ${detail.service_id}` });
-      }
-    }
-
     const package_price = calculatePackagePrice(package_details);
 
     const newBranchPackage = new BranchPackage({
-      branch_id: mongoose.Types.ObjectId(branch_id),
+      branch_id,
       package_name,
       description,
       start_date,
       end_date,
       package_details,
       package_price,
-      salon_id: mongoose.Types.ObjectId(salon_id)
+      salon_id,
     });
 
     const savedPackage = await newBranchPackage.save();
-    res.status(201).json({ 
-      message: "Branch package created successfully", 
-      data: savedPackage 
-    });
 
+    res.status(201).json({
+      message: "Branch package created successfully",
+      data: savedPackage,
+    });
   } catch (error) {
     console.error("Error creating branch package:", error);
-    res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
-    });
+    res.status(500).json({ message: "Server error", error });
   }
 });
 
@@ -130,6 +123,36 @@ router.get("/", async (req, res) => {
     }
 
     const branchPackages = await BranchPackage.find({ salon_id })
+      .populate("branch_id", "name")
+      .populate("package_details.service_id", "name regular_price duration");
+
+    res.status(200).json({ 
+      message: "Branch packages fetched successfully", 
+      data: branchPackages 
+    });
+  } catch (error) {
+    console.error("Error fetching branch packages:", error);
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message 
+    });
+  }
+});
+
+// get package details filtered by branch_id
+router.get("/by-branch", async (req, res) => {
+  try {
+    const { salon_id, branch_id } = req.query;
+
+    if (!salon_id || !branch_id) {
+      return res.status(400).json({ message: "salon_id and branch_id are required" });
+    }
+
+    if (!mongoose.isValidObjectId(salon_id) || !mongoose.isValidObjectId(branch_id)) {
+      return res.status(400).json({ message: "Invalid salon_id or branch_id format" });
+    }
+
+    const branchPackages = await BranchPackage.find({ salon_id, branch_id })
       .populate("branch_id", "name")
       .populate("package_details.service_id", "name regular_price duration");
 

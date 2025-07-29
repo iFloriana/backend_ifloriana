@@ -3,6 +3,8 @@ const SubCategory = require("../models/SubCategory");
 const Salon = require("../models/Salon"); // Assuming you have a Salon model
 const mongoose = require("mongoose");
 const router = express.Router();
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("subcategory_images");
 
 // Middleware to validate salon_id
 const validateSalonId = async (req, res, next) => {
@@ -33,8 +35,9 @@ const validateSalonId = async (req, res, next) => {
 router.use(validateSalonId);
 
 // Create SubCategory
-router.post("/", async (req, res) => {
-  const { salon_id, image, category_id, name, status } = req.body;
+router.post("/", upload.single("image"), async (req, res) => {
+  const { salon_id, category_id, name, status } = req.body;
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   try {
     const newSubCategory = new SubCategory({
@@ -87,9 +90,12 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const { salon_id } = req.query; 
-  const updateData = req.body;
+  const updateData = { ...req.body };
 
   try {
+    if (req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
     const updatedSubCategory = await SubCategory.findOneAndUpdate({ _id: id, salon_id }, updateData, { new: true });
     if (!updatedSubCategory) {
       return res.status(404).json({ message: "SubCategory not found" });

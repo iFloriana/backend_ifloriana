@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const AppBanner = require('../models/AppBanner');
+const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
+const upload = getUploader("appbanner_images"); // ✅ Specify the folder for branch images
 
 // Create a new app banner with salon_id
-router.post('/', async (req, res) => {
-    const { salon_id, image, name, url, type, link_id, status } = req.body;
+router.post('/', upload.single("image"), async (req, res) => {
+    const { salon_id, name, url, type, link_id, status } = req.body;
+    const image = req.file ? req.file.path.replace(/\\/g, '/') : null;
 
     if (!salon_id) {
         return res.status(400).json({ message: 'salon_id is required' });
@@ -54,18 +57,23 @@ router.get('/:id', async (req, res) => {
 
 // Update an app banner by ID with salon_id validation
 router.put('/:id', async (req, res) => {
-    const { salon_id, image, name, url, type, link_id, status } = req.body;
+    const { salon_id, name, url, type, link_id, status } = req.body;
+    const image = req.file ? req.file.path.replace(/\\/g, "/") : undefined;
 
     if (!salon_id) {
         return res.status(400).json({ message: 'salon_id is required' });
     }
 
     try {
+        const updateData = { name, url, type, link_id, status };
+        if (image) updateData.image = image;
+
         const updatedAppBanner = await AppBanner.findOneAndUpdate(
             { _id: req.params.id, salon_id },
-            { image, name, url, type, link_id, status },
+            updateData,
             { new: true }
         );
+
         if (!updatedAppBanner) return res.status(404).json({ message: 'App banner not found' });
         res.status(200).json({ message: 'App banner updated successfully', data: updatedAppBanner });
     } catch (error) {

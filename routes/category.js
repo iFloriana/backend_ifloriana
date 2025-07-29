@@ -1,10 +1,14 @@
 const express = require("express");
 const Category = require("../models/Category");
 const router = express.Router();
+const mongoose = require("mongoose");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader("category_images");
 
 // Create Category with salon_id validation
-router.post("/", async (req, res) => {
-  const { salon_id, name, image, status } = req.body;
+router.post("/", upload.single("image"), async (req, res) => {
+  const { salon_id, name, status } = req.body;
+  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
   if (!salon_id) {
     return res.status(400).json({ message: "salon_id is required" });
@@ -74,16 +78,22 @@ router.get("/:id", async (req, res) => {
 });
 
 // Update Category
-router.put("/:id", async (req, res) => {
+router.put("/:id",upload.single("image"), async (req, res) => {
   const { id } = req.params;
-  const updateData = req.body;
+  const updateData = { ...req.body };
 
   try {
-    const updatedCategory = await Category.findByIdAndUpdate(id, updateData, { new: true });
+    if (req.file) {
+      updateData.image = req.file.path.replace(/\\/g, '/');
+    }
+
+    const updatedCategory = await Category.finfdByIdAndUpdate(id, updateData, { new: true });
+
     if (!updatedCategory) {
       return res.status(404).json({ message: "Category not found" });
     }
-    res.status(201).json({ message: "Category updated successfully", data: updatedCategory });
+
+    res.status(200).json({ message: "Category updated successfully", data: updatedCategory });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
