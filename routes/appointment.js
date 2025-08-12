@@ -1,20 +1,21 @@
-// appointment.js
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
+const { ObjectId } = mongoose.Types;
+
+const Order = require("../models/Order");
 const Appointment = require("../models/Appointment");
+const CustomerPackage = require("../models/CustomerPackage");
 const Service = require("../models/Service");
 const Product = require("../models/Product");
-const Customer = require("../models/Customer");
-const CustomerPackage = require("../models/CustomerPackage");
-const mongoose = require("mongoose");
-const Order = require("../models/Order");
+const Coupon = require("../models/Coupon");
+const Tax = require("../models/Tax");
+
 const orderHelpers = require("../routes/order");
-const Coupon = require("../models/Coupon"); // Added for coupon calculation
-const Tax = require("../models/Tax"); // Added for tax calculation
 const generateOrderInvoicePDF = orderHelpers.generateOrderInvoicePDF;
 const buildOrderInvoice = orderHelpers.buildOrderInvoice;
 
-// ✅ Create Appointment
+// POST: Create Appointment
 router.post("/", async (req, res) => {
   try {
     const {
@@ -28,52 +29,33 @@ router.post("/", async (req, res) => {
       notes,
       status,
       payment_status,
-      additional_charges = 0
     } = req.body;
 
     let total_payment = 0;
     const updatedServices = [];
 
+    // Simplified service handling - no package checks
     for (const svc of services) {
       const { service_id, staff_id } = svc;
-      let used_package = false, service_amount = 0, package_id = null;
-
-      const activePackage = await CustomerPackage.findOne({
-        customer_id,
-        salon_id,
-        end_date: { $gte: new Date() },
-        "package_details": {
-          $elemMatch: { service_id, quantity: { $gt: 0 } }
-        }
-      });
-
-      if (activePackage) {
-        const pkgDetail = activePackage.package_details.find(
-          item => item.service_id.toString() === service_id.toString()
-        );
-
-        if (pkgDetail) {
-          used_package = true;
-          package_id = activePackage._id;
-          await CustomerPackage.updateOne(
-            { _id: package_id, "package_details.service_id": svc.service_id },
-            { $inc: { "package_details.$.quantity": -1 } }
-          );
-        }
-      }
-
-      if (!used_package) {
-        const srv = await Service.findById(service_id);
-        if (!srv) return res.status(404).json({ message: "Service not found" });
-
-        service_amount = srv.regular_price;
-      }
-
+      
+      const srv = await Service.findById(service_id);
+      if (!srv) return res.status(404).json({ message: "Service not found" });
+      
+      const service_amount = srv.regular_price;
       total_payment += service_amount;
-      updatedServices.push({ service_id, staff_id, service_amount, used_package, package_id });
+
+      updatedServices.push({
+        service_id,
+        staff_id,
+        service_amount,
+        used_package: false, // Keeping field for compatibility
+        package_id: null    // Keeping field for compatibility
+      });
     }
 
     const updatedProducts = [];
+    
+    // Product handling remains the same
     for (const prod of products) {
       const { product_id, variant_id, quantity } = prod;
       const qty = parseInt(quantity);
@@ -96,86 +78,37 @@ router.post("/", async (req, res) => {
       }
 
       const total_price = unit_price * qty;
-
       total_payment += total_price;
-      updatedProducts.push({ product_id, variant_id, quantity: qty, unit_price, total_price });
+
+      updatedProducts.push({
+        product_id,
+        variant_id,
+        quantity: qty,
+        unit_price,
+        total_price
+      });
     }
 
-    if (isNaN(total_payment)) {
-      return res.status(400).json({ message: "Total payment NaN — check prices." });
-    }
-
-    const order_code = `ORD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const appointment = await Appointment.create({
-      salon_id, customer_id, branch_id,
-      appointment_date, appointment_time,
+      salon_id,
+      customer_id,
+      branch_id,
+      appointment_date,
+      appointment_time,
       services: updatedServices,
       products: updatedProducts,
-      notes, status, payment_status,
+      notes,
+      status,
+      payment_status,
       total_payment,
-      additional_charges,
-      order_code
+      order_code: `ORD-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`
     });
 
-    // create orders if products are bought
-    if (updatedProducts.length > 0) {
-      const orderProducts = updatedProducts.map(prod => ({
-        product_id: prod.product_id,
-        variant_id: prod.variant_id,
-        quantity: prod.quantity,
-        unit_price: prod.unit_price,
-        total_price: prod.total_price
-      }));
+    res.status(201).json({ 
+      message: "Appointment created successfully", 
+      data: appointment 
+    });
 
-      const total_price = updatedProducts.reduce((sum, p) => sum + p.total_price, 0);
-
-      const payment_method = req.body.payment_method && ["cash", "card", "upi"].includes(req.body.payment_method)
-        ? req.body.payment_method
-        : "cash";
-
-      const newOrder = new Order({
-        salon_id,
-        branch_id,
-        customer_id,
-        products: orderProducts,
-        total_price,
-        payment_method
-      });
-
-      await newOrder.save();
-
-      await newOrder.populate([
-        { path: "salon_id" },
-        { path: "branch_id" },
-        { path: "customer_id" },
-        { path: "products.product_id" },
-        { path: "products.variant_id" }
-      ]);
-
-      const invoice = buildOrderInvoice(newOrder);
-      const pdfFileName = await generateOrderInvoicePDF(invoice, newOrder.order_code);
-      const invoicePDFUrl = `/api/uploads/${pdfFileName}`;
-
-      newOrder.invoice_pdf_url = invoicePDFUrl;
-      await newOrder.save();
-
-      for (const prod of updatedProducts) {
-        const productDoc = await Product.findById(prod.product_id);
-        if (productDoc) {
-          if (prod.variant_id) {
-            const variant = productDoc.variants.find(v => v._id.toString() === prod.variant_id.toString());
-            if (variant && typeof variant.stock === 'number') {
-              variant.stock = Math.max(0, variant.stock - prod.quantity);
-            }
-          } else if (typeof productDoc.stock === 'number') {
-            productDoc.stock = Math.max(0, productDoc.stock - prod.quantity);
-          }
-          await productDoc.save();
-        }
-      }
-    }
-
-    res.status(201).json({ message: "Appointment created successfully", data: appointment });
   } catch (err) {
     console.error("Appointment creation error:", err);
     res.status(500).json({ message: "Server Error", error: err.message });
@@ -370,105 +303,93 @@ router.get('/by-branch', async (req, res) => {
   }
 });
 
-// ✅ Update Appointment
 router.put("/:id", async (req, res) => {
   try {
-    const appointmentId = req.params.id;
-    const {
-      appointment_date,
-      appointment_time,
-      services = [],
-      products = [],
-      notes,
-      status,
-      payment_status,
-      additional_charges = 0
-    } = req.body;
+    const { id } = req.params;
+    const updateData = req.body;
+
+    if (!updateData || Object.keys(updateData).length === 0) {
+      return res.status(400).json({ message: "No data provided for update" });
+    }
 
     let total_payment = 0;
     const updatedServices = [];
+    const updatedProducts = [];
 
-    for (const svc of services) {
-      const { service_id, staff_id } = svc;
-      let used_package = false, service_amount = 0, package_id = null;
-
-      const activePackage = await CustomerPackage.findOne({
-        customer_id: req.body.customer_id,
-        salon_id: req.body.salon_id,
-        end_date: { $gte: new Date() },
-        "package_details": {
-          $elemMatch: { service_id, quantity: { $gt: 0 } }
-        }
-      });
-
-      if (activePackage) {
-        const pkgDetail = activePackage.package_details.find(
-          item => item.service_id.toString() === service_id.toString()
-        );
-
-        if (pkgDetail) {
-          used_package = true;
-          package_id = activePackage._id;
-        }
-      }
-
-      if (!used_package) {
+    // Simplified service handling - no package checks
+    if (updateData.services && Array.isArray(updateData.services)) {
+      for (const svc of updateData.services) {
+        const { service_id, staff_id } = svc;
+        
         const srv = await Service.findById(service_id);
         if (!srv) return res.status(404).json({ message: "Service not found" });
+        
+        const service_amount = srv.regular_price;
+        total_payment += service_amount;
 
-        service_amount = srv.regular_price;
+        updatedServices.push({
+          service_id,
+          staff_id,
+          service_amount,
+          used_package: false, // Keeping field for compatibility
+          package_id: null    // Keeping field for compatibility
+        });
       }
-
-      total_payment += service_amount;
-      updatedServices.push({ service_id, staff_id, service_amount, used_package, package_id });
+      updateData.services = updatedServices;
     }
 
-    const updatedProducts = [];
-    for (const prod of products) {
-      const { product_id, variant_id, quantity } = prod;
-      const qty = parseInt(quantity);
-      if (!qty || qty < 1) {
-        return res.status(400).json({ message: "Invalid product quantity" });
-      }
+    // Product handling (optional)
+    if (updateData.products && Array.isArray(updateData.products)) {
+      for (const prod of updateData.products) {
+        const { product_id, variant_id, quantity } = prod;
+        const qty = parseInt(quantity) || 1;
 
-      const prodDoc = await Product.findById(product_id);
-      if (!prodDoc) return res.status(404).json({ message: "Product not found" });
+        const prodDoc = await Product.findById(product_id);
+        if (!prodDoc) return res.status(404).json({ message: "Product not found" });
 
-      let unit_price;
-      if (variant_id) {
-        const variant = prodDoc.variants.find(v => v._id.toString() === variant_id);
-        if (!variant || typeof variant.price !== "number") {
-          return res.status(400).json({ message: "Variant or price unavailable" });
+        let unit_price;
+        if (variant_id) {
+          const variant = prodDoc.variants.find(v => v._id.toString() === variant_id);
+          if (!variant || typeof variant.price !== "number") {
+            return res.status(400).json({ message: "Variant or price unavailable" });
+          }
+          unit_price = variant.price;
+        } else {
+          unit_price = prodDoc.price || 0;
         }
-        unit_price = variant.price;
-      } else {
-        unit_price = prodDoc.price || 0;
-      }
 
-      const total_price = unit_price * qty;
-      total_payment += total_price;
-      updatedProducts.push({ product_id, variant_id, quantity: qty, unit_price, total_price });
+        const total_price = unit_price * qty;
+        total_payment += total_price;
+
+        updatedProducts.push({
+          product_id,
+          variant_id: variant_id || null,
+          quantity: qty,
+          unit_price,
+          total_price
+        });
+      }
+      updateData.products = updatedProducts;
     }
 
-    const updated = await Appointment.findByIdAndUpdate(appointmentId, {
-      appointment_date,
-      appointment_time,
-      services: updatedServices,
-      products: updatedProducts,
-      notes,
-      status,
-      payment_status,
-      total_payment,
-      additional_charges
-    }, { new: true });
+    const updatedAppointment = await Appointment.findByIdAndUpdate(
+      id,
+      { ...updateData, total_payment },
+      { new: true }
+    );
 
-    res.status(200).json({ message: "Appointment updated successfully", data: updated });
-  } catch (err) {
-    console.error("Appointment update error:", err);
-    res.status(500).json({ message: "Server Error", error: err.message });
+    res.status(200).json({
+      message: "Appointment updated successfully",
+      data: updatedAppointment
+    });
+  } catch (error) {
+    console.error("Error updating appointment:", error);
+    res.status(500).json({ 
+      message: "Internal Server Error", 
+      error: error.message 
+    });
   }
 });
-
 
 // Delete appointment
 router.delete("/:id", async (req, res) => {

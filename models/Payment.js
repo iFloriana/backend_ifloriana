@@ -47,10 +47,14 @@ const PaymentSchema = new mongoose.Schema({
     type: String,
     enum: ["percentage", "flat"]
   },
+  membership_discount: {
+    type: Number,
+    default: 0
+  },
   additional_charges: {
     type: Number,
     default: 0
-  }, 
+  },
   tax_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Tax"
@@ -74,6 +78,9 @@ const PaymentSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
+  },
+  invoice_file_name: {
+    type: String
   }
 });
 

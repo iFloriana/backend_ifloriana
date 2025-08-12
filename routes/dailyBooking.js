@@ -18,7 +18,7 @@ router.get("/", async (req, res) => {
 
     const payments = await Payment.find({ salon_id }).lean();
 
-    // Map payment by appointment ID
+    // Map payments by appointment ID
     const paymentMap = {};
     for (let pay of payments) {
       if (pay.appointment_id) {
@@ -26,28 +26,34 @@ router.get("/", async (req, res) => {
       }
     }
 
-    // Prepare summaries
-    const dateSet = new Set();
     const summaryMap = {};
 
     for (let appt of appointments) {
       let dateObj = appt.appointment_date ? new Date(appt.appointment_date) : new Date(appt.createdAt);
       if (isNaN(dateObj)) continue;
 
-      const dateStr = dateObj.getUTCFullYear() + "-" + String(dateObj.getUTCMonth() + 1).padStart(2, '0') + "-" + String(dateObj.getUTCDate()).padStart(2, '0');
-      dateSet.add(dateStr);
+      const dateStr =
+        dateObj.getUTCFullYear() +
+        "-" +
+        String(dateObj.getUTCMonth() + 1).padStart(2, "0") +
+        "-" +
+        String(dateObj.getUTCDate()).padStart(2, "0");
 
       if (!summaryMap[dateStr]) {
         summaryMap[dateStr] = {
           date: dateStr,
           appointmentsCount: 0,
           servicesCount: 0,
+          usedPackageCount: 0,
           serviceAmount: 0,
+          productAmount: 0,
           taxAmount: 0,
           tipsEarning: 0,
           additionalDiscount: 0,
           additionalCharges: 0,
-          finalAmount: 0
+          membershipDiscount: 0,
+          finalAmount: 0,
+          paymentBreakdown: { cash: 0, card: 0, upi: 0 }
         };
       }
 
@@ -55,40 +61,67 @@ router.get("/", async (req, res) => {
 
       summaryMap[dateStr].appointmentsCount += 1;
       summaryMap[dateStr].servicesCount += appt.services?.length || 0;
-      summaryMap[dateStr].serviceAmount += appt.services?.reduce((sum, s) => sum + (s.service_amount || 0), 0);
+
+      // Count used package services
+      const usedPkgCount = appt.services?.filter(s => s.used_package)?.length || 0;
+      summaryMap[dateStr].usedPackageCount += usedPkgCount;
+
+      // Service amount calculation (minus membership discount)
+      const rawServiceAmount = appt.services?.reduce((sum, s) => sum + (s.service_amount || 0), 0) || 0;
+      const membershipDisc = payment?.membership_discount || 0;
+      summaryMap[dateStr].serviceAmount += rawServiceAmount - membershipDisc;
+      summaryMap[dateStr].membershipDiscount += membershipDisc;
+
+      // Product amount from Payment
+      summaryMap[dateStr].productAmount += payment?.product_amount || 0;
+
+      // Other amounts
       summaryMap[dateStr].tipsEarning += payment?.tips || 0;
       summaryMap[dateStr].taxAmount += payment?.tax_amount || 0;
       summaryMap[dateStr].additionalDiscount += payment?.additional_discount || 0;
-
-      // ⛔ Additional charges not found in schema. Update this if added in future.
       summaryMap[dateStr].additionalCharges += payment?.additional_charges || 0;
 
+      // Payment method breakdown
+      if (payment?.payment_method) {
+        const method = payment.payment_method.toLowerCase();
+        if (method.includes("cash")) summaryMap[dateStr].paymentBreakdown.cash += payment.final_total || 0;
+        if (method.includes("card")) summaryMap[dateStr].paymentBreakdown.card += payment.final_total || 0;
+        if (method.includes("upi")) summaryMap[dateStr].paymentBreakdown.upi += payment.final_total || 0;
+      }
+
+      // Final amount calculation (subtract coupon discount too)
       summaryMap[dateStr].finalAmount =
         summaryMap[dateStr].serviceAmount +
+        summaryMap[dateStr].productAmount +
         summaryMap[dateStr].taxAmount +
         summaryMap[dateStr].tipsEarning +
         summaryMap[dateStr].additionalCharges -
-        summaryMap[dateStr].additionalDiscount;
+        summaryMap[dateStr].additionalDiscount -
+        (payment?.coupon_discount || 0);
     }
 
-    // Fill in 14 days back
+    // Fill missing last 14 days
     const today = new Date();
     for (let i = 0; i < 14; i++) {
       const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
       date.setUTCDate(date.getUTCDate() - i);
-      const dateStr = date.getUTCFullYear() + "-" + String(date.getUTCMonth() + 1).padStart(2, '0') + "-" + String(date.getUTCDate()).padStart(2, '0');
+      const dateStr = date.getUTCFullYear() + "-" + String(date.getUTCMonth() + 1).padStart(2, "0") + "-" + String(date.getUTCDate()).padStart(2, "0");
 
       if (!summaryMap[dateStr]) {
         summaryMap[dateStr] = {
           date: dateStr,
           appointmentsCount: 0,
           servicesCount: 0,
+          usedPackageCount: 0,
           serviceAmount: 0,
+          productAmount: 0,
           taxAmount: 0,
           tipsEarning: 0,
           additionalDiscount: 0,
           additionalCharges: 0,
-          finalAmount: 0
+          membershipDiscount: 0,
+          finalAmount: 0,
+          paymentBreakdown: { cash: 0, card: 0, upi: 0 }
         };
       }
     }

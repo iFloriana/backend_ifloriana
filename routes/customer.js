@@ -1,127 +1,151 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
+const path = require("path");
 const Customer = require("../models/Customer");
 const BranchPackage = require("../models/BranchPackage");
 const BranchMembership = require("../models/branchMembership");
 const CustomerPackage = require("../models/CustomerPackage");
 const CustomerMembership = require("../models/CustomerMembership");
-const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
-const upload = getUploader("customer_images"); // ✅ Specify the folder for branch images
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader();
+
 const router = express.Router();
+
+// ------------------- Serve Customer Image -------------------
+router.get("/image/:filename", async (req, res) => {
+    try {
+        const id = req.params.filename.split(".")[0];
+
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid customer ID" });
+        }
+
+        const customer = await Customer.findById(id);
+        if (!customer?.image?.data) {
+            return res.status(404).json({ message: "Image not found" });
+        }
+
+        res.set("Content-Type", customer.image.contentType || "image/jpeg");
+        res.set("Content-Disposition", "inline");
+        res.send(Buffer.from(customer.image.data));
+    } catch (error) {
+        console.error("Image fetch error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
 
 // Create Customer
 router.post("/", upload.single("image"), async (req, res) => {
-  try {
-    const {
-      salon_id,
-      full_name,
-      email,
-      gender,
-      phone_number,
-      status,
-      branch_package,
-      branch_membership
-    } = req.body;
-
-    const image = req.file ? req.file.path.replace(/\\/g, '/') : null;
-
-    let newCustomerData = {
-      salon_id,
-      full_name,
-      gender,
-      phone_number,
-      status,
-      image
-    };
-
-    // ✅ Only include email if it's not empty or null
-    if (email && email.trim() !== "") {
-      newCustomerData.email = email.trim();
-    }
-
-    // ✅ Branch Package Handling
-    if (branch_package) {
-      const pkg = await BranchPackage.findById(branch_package);
-      if (!pkg) return res.status(400).json({ message: "Invalid BranchPackage ID" });
-
-      newCustomerData.branch_package = branch_package;
-      newCustomerData.branch_package_bought_at = new Date();
-      newCustomerData.branch_package_valid_till = pkg.end_date;
-    }
-
-    // ✅ Branch Membership Handling
-    if (branch_membership) {
-      const membership = await BranchMembership.findById(branch_membership);
-      if (!membership) return res.status(400).json({ message: "Invalid BranchMembership ID" });
-
-      let monthsToAdd = 0;
-      if (membership.subscription_plan !== "lifetime") {
-        monthsToAdd = parseInt(membership.subscription_plan.split("-")[0]);
-      }
-
-      const now = new Date();
-      let validTill = membership.subscription_plan === "lifetime"
-        ? null
-        : new Date(now.setMonth(now.getMonth() + monthsToAdd));
-
-      newCustomerData.branch_membership = branch_membership;
-      newCustomerData.branch_membership_bought_at = new Date();
-      newCustomerData.branch_membership_valid_till = validTill;
-    }
-
-    const newCustomer = new Customer(newCustomerData);
-    await newCustomer.save();
-
-    // ✅ Create CustomerMembership Record
-    if (branch_membership) {
-      const membership = await BranchMembership.findById(branch_membership);
-      let monthsToAdd = 0;
-      if (membership.subscription_plan !== "lifetime") {
-        monthsToAdd = parseInt(membership.subscription_plan.split("-")[0]);
-      }
-
-      const now = new Date();
-      const validTill = membership.subscription_plan === "lifetime"
-        ? null
-        : new Date(now.getTime() + monthsToAdd * 30 * 24 * 60 * 60 * 1000);
-
-      await CustomerMembership.create({
-        customer_id: newCustomer._id,
-        salon_id,
-        branch_membership,
-        start_date: new Date(),
-        end_date: validTill
-      });
-    }
-
-    res.status(201).json({ message: "Customer created successfully", data: newCustomer });
-  } catch (error) {
-    console.error("Error creating customer:", error);
-    res.status(500).json({ message: "Server error", error });
-  }
-});
-
-// Route for creating a customer with image upload
-router.post("/upload", upload.single("image"), async (req, res) => {
     try {
-        const { full_name, email, phone_number, gender, status } = req.body;
-        const image = req.file ? req.file.path.replace(/\\/g, '/') : null;
-
-        // Save customer details with the image path
-        const newCustomer = await Customer.create({
+        const {
+            salon_id,
             full_name,
             email,
-            phone_number,
             gender,
+            phone_number,
             status,
-            image,
-        });
+            branch_package,
+            branch_membership
+        } = req.body;
 
-        res.status(201).json({ message: "Customer created successfully", data: newCustomer });
+        const image = req.file
+            ? {
+                data: req.file.buffer,
+                contentType: req.file.mimetype,
+                originalName: req.file.originalname,
+                extension: path.extname(req.file.originalname).slice(1)
+            }
+            : undefined;
+
+        let newCustomerData = {
+            salon_id,
+            full_name,
+            gender,
+            phone_number,
+            status,
+            image
+        };
+
+        if (email && email.trim() !== "") {
+            newCustomerData.email = email.trim();
+        }
+
+        let pkg;
+        if (branch_package) {
+            pkg = await BranchPackage.findById(branch_package);
+            if (!pkg) return res.status(400).json({ message: "Invalid BranchPackage ID" });
+
+            newCustomerData.branch_package = branch_package;
+            newCustomerData.branch_package_bought_at = new Date();
+            newCustomerData.branch_package_valid_till = pkg.end_date;
+        }
+
+        if (branch_membership) {
+            const membership = await BranchMembership.findById(branch_membership);
+            if (!membership) return res.status(400).json({ message: "Invalid BranchMembership ID" });
+
+            let monthsToAdd = 0;
+            if (membership.subscription_plan !== "lifetime") {
+                monthsToAdd = parseInt(membership.subscription_plan.split("-")[0]);
+            }
+
+            const now = new Date();
+            const validTill = membership.subscription_plan === "lifetime"
+                ? null
+                : new Date(now.setMonth(now.getMonth() + monthsToAdd));
+
+            newCustomerData.branch_membership = branch_membership;
+            newCustomerData.branch_membership_bought_at = new Date();
+            newCustomerData.branch_membership_valid_till = validTill;
+        }
+
+        const newCustomer = new Customer(newCustomerData);
+        await newCustomer.save();
+
+        if (branch_package && pkg) {
+            await CustomerPackage.create({
+                customer_id: newCustomer._id,
+                salon_id,
+                branch_package_id: branch_package,
+                start_date: new Date(),
+                end_date: pkg.end_date,
+                package_details: pkg.package_details || []
+            });
+        }
+
+        if (branch_membership) {
+            const membership = await BranchMembership.findById(branch_membership);
+            let monthsToAdd = 0;
+            if (membership.subscription_plan !== "lifetime") {
+                monthsToAdd = parseInt(membership.subscription_plan.split("-")[0]);
+            }
+
+            const now = new Date();
+            const validTill = membership.subscription_plan === "lifetime"
+                ? null
+                : new Date(now.getTime() + monthsToAdd * 30 * 24 * 60 * 60 * 1000);
+
+            await CustomerMembership.create({
+                customer_id: newCustomer._id,
+                salon_id,
+                branch_membership,
+                start_date: new Date(),
+                end_date: validTill
+            });
+        }
+
+        const response = newCustomer.toObject();
+        response.image_url = newCustomer.image?.data
+            ? `/api/customers/image/${newCustomer._id}.${newCustomer.image?.extension || "jpg"}`
+            : null;
+        delete response.image;
+
+        res.status(201).json({ message: "Customer created successfully", data: response });
     } catch (error) {
-        console.error("Error creating customer with image:", error);
-        res.status(500).json({ message: "Server error" });
+        console.error("Error creating customer:", error);
+        res.status(500).json({ message: "Server error", error });
     }
 });
 
@@ -144,9 +168,23 @@ router.get("/", async (req, res) => {
                 },
             })
             .populate("branch_membership")
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .lean();
 
-        res.status(200).json({ message: "Customers fetched successfully", data: customers });
+        const enrichedCustomers = customers.map((customer) => {
+            const enriched = {
+                ...customer,
+                image_url: customer.image?.data
+                    ? `/api/customers/image/${customer._id}.${customer.image.extension || 'jpg'}`
+                    : null,
+            };
+
+            delete enriched.image; // ✅ Properly remove base64 data
+
+            return enriched;
+        });
+
+        res.status(200).json({ message: "Customers fetched successfully", data: enrichedCustomers });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
@@ -187,13 +225,18 @@ router.get("/:id", async (req, res) => {
 
     try {
         const customer = await Customer.findOne({ _id: id, salon_id })
-            .populate("salon_id branch_package branch_membership");
+            .populate("salon_id branch_package branch_membership")
+            .lean();
 
         if (!customer) {
             return res.status(404).json({ message: "Customer not found" });
         }
 
-        res.status(200).json({ message: "Customer fetched successfully", data: customer });
+        customer.image_url = customer.image?.data
+            ? `/api/image/${customer._id}.${customer.image.extension || 'jpg'}`
+            : null,
+
+            res.status(200).json({ message: "Customer fetched successfully", data: customer });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
@@ -212,11 +255,17 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     try {
         let updateData = { ...req.body };
 
+        // ✅ Use binary buffer for image
         if (req.file) {
-            updateData.image = req.file.path.replace(/\\/g, "/");
+            updateData.image = {
+                data: req.file.buffer,
+                contentType: req.file.mimetype,
+                originalName: req.file.originalname,
+                extension: path.extname(req.file.originalname).slice(1)
+            };
         }
 
-        // Optional: Branch Package
+        // ✅ Optional: Branch Package
         if (branch_package) {
             const pkg = await BranchPackage.findById(branch_package);
             if (!pkg) return res.status(400).json({ message: "Invalid BranchPackage ID" });
@@ -228,14 +277,14 @@ router.put("/:id", upload.single("image"), async (req, res) => {
             await CustomerPackage.create({
                 customer_id: id,
                 salon_id,
-                branch_package,
+                branch_package_id: branch_package,
                 start_date: new Date(),
                 end_date: pkg.end_date,
                 package_details: pkg.package_details || [],
             });
         }
 
-        // Optional: Branch Membership
+        // ✅ Optional: Branch Membership
         if (branch_membership) {
             const membership = await BranchMembership.findById(branch_membership);
             if (!membership) return res.status(400).json({ message: "Invalid BranchMembership ID" });
@@ -254,7 +303,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
             updateData.branch_membership_bought_at = new Date();
             updateData.branch_membership_valid_till = validTill;
 
-            // ✅ Avoid duplicate CustomerMembership records
+            // Avoid duplicate CustomerMembership
             const alreadyExists = await CustomerMembership.findOne({
                 customer_id: id,
                 branch_membership,
@@ -271,6 +320,7 @@ router.put("/:id", upload.single("image"), async (req, res) => {
             }
         }
 
+        // ✅ Update customer
         const updatedCustomer = await Customer.findOneAndUpdate(
             { _id: id, salon_id },
             updateData,
@@ -281,7 +331,16 @@ router.put("/:id", upload.single("image"), async (req, res) => {
             return res.status(404).json({ message: "Customer not found" });
         }
 
-        res.json({ message: "Customer updated", data: updatedCustomer });
+        const updated = updatedCustomer.toObject();
+
+        // ✅ Add image_url for preview
+        updated.image_url = updated.image?.data
+            ? `/api/image/${updated._id}.${updated.image.extension || 'jpg'}`
+            : null;
+
+        delete updated.image; // Optional: hide raw image from response
+
+        res.json({ message: "Customer updated", data: updated });
     } catch (error) {
         console.error("Error updating customer:", error);
         res.status(500).json({ message: "Server error", error: error.message });
@@ -312,7 +371,7 @@ router.patch("/:id", async (req, res) => {
         await CustomerPackage.create({
             customer_id: customer._id,
             salon_id,
-            branch_package,
+            branch_package_id: branch_package,
             start_date: new Date(),
             end_date: pkg.end_date,
             package_details: pkg.package_details || [],

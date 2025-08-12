@@ -46,6 +46,7 @@ const revenueCommissionRoutes = require("./routes/revenueCommission");
 const staffRevenueRoutes = require("./routes/staffRevenue");
 const staffPaymentsRoutes = require("./routes/staffPayments");
 const orderRoutes = require('./routes/order').router;
+const inHouseProductRoutes = require('./routes/inHouseProduct');
 
 // Connect to MongoDB
 mongoose.connect("mongodb://localhost:27017/salon_admin")
@@ -124,6 +125,7 @@ app.use("/api/revenue-commissions", revenueCommissionRoutes);
 app.use("/api/staff-revenue", staffRevenueRoutes);
 app.use("/api/staff-payouts", staffPaymentsRoutes);
 app.use("/api/order", orderRoutes);
+app.use("/api/in-house-product", inHouseProductRoutes);
 
 // Start server
 const PORT = 5000;

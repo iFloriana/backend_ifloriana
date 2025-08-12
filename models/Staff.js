@@ -42,8 +42,10 @@ const StaffSchema = new mongoose.Schema({
     default: 1,
   },
   image: {
-    type: String,
-    required: false,
+    data: Buffer,
+    contentType: String,
+    originalName: String,
+    extension: String,
   },
   show_in_calendar: {
     type: Boolean,

@@ -1,16 +1,3 @@
-// Update Admin and Salon (with image upload in salonDetails)
-const multer = require("multer");
-const path = require("path");
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "./uploads");
-  },
-  filename: function (req, file, cb) {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  },
-});
-const upload = multer({ storage });
-
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
@@ -20,6 +7,10 @@ const SuperAdminPackage = require("../models/SuperAdminPackage");
 const Salon = require("../models/Salon");
 const nodemailer = require("nodemailer");
 const crypto = require("crypto");
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader();
+const path = require("path");
+const mongoose = require("mongoose");
 require("dotenv").config();
 
 // Nodemailer setup
@@ -35,6 +26,27 @@ const transporter = nodemailer.createTransport({
 
 // Temporary storage for password reset tokens
 const resetTokenStore = {};
+
+router.get("/image/:filename", async (req, res) => {
+  try {
+    const id = req.params.filename.split(".")[0];
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid Salon ID" });
+    }
+
+    const salon = await Salon.findById(id);
+    if (!salon?.image?.data) {
+      return res.status(404).json({ message: "Image not found" });
+    }
+
+    res.set("Content-Type", salon.image.contentType || "image/jpeg");
+    res.set("Content-Disposition", "inline");
+    res.send(Buffer.from(salon.image.data));
+  } catch (error) {
+    console.error("Salon image fetch error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 // Check if email already exists
 router.get("/check-email", async (req, res) => {
@@ -103,7 +115,7 @@ router.post("/signup", async (req, res) => {
     let packageExpirationDate = new Date(packageStartDate);
 
     switch (packageExists.subscription_plan) {
-      case "15-days": 
+      case "15-days":
         packageExpirationDate.setDate(packageExpirationDate.getDate() + 15);
         break;
       case "1-month":
@@ -277,23 +289,23 @@ router.post("/renew-package", async (req, res) => {
   }
 
   try {
-    const admin = await Admin.finfById(admin_id);
+    const admin = await Admin.findById(admin_id);
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    const seletedPackage = await SuperAdminPackage.findById(package_id);
-    if (!seletedPackage) {
+    const selectedPackage = await SuperAdminPackage.findById(package_id); // ✅ Correct spelling
+    if (!selectedPackage) {
       return res.status(404).json({ message: "Package not found" });
     }
 
     const now = new Date();
     let newExpiration = new Date(now);
 
-    switch (seletedPackage.subscription_plan) {
+    switch (selectedPackage.subscription_plan) {
       case "15-days":
         newExpiration.setDate(newExpiration.getDate() + 15);
-        break;  
+        break;
       case "1-month":
         newExpiration.setMonth(newExpiration.getMonth() + 1);
         break;
@@ -306,8 +318,8 @@ router.post("/renew-package", async (req, res) => {
       case "1-year":
         newExpiration.setFullYear(newExpiration.getFullYear() + 1);
         break;
-      default:  
-      return res.status(400).json({ message: "Invalid subscription plan" });
+      default:
+        return res.status(400).json({ message: "Invalid subscription plan" });
     }
 
     admin.package_id = selectedPackage._id;
@@ -433,7 +445,6 @@ router.get("/reset-password", async (req, res) => {
   }
 });
 
-
 // Reset Password - POST route to update password (token required)
 router.post("/reset-password", async (req, res) => {
   const { token, email, new_password, confirm_password } = req.body;
@@ -483,21 +494,16 @@ const generateRandomPassword = (length = 10) => {
 
 router.put("/update-admin/:id", upload.single("image"), async (req, res) => {
   const { id } = req.params;
-  const {
-    full_name,
-    phone_number,
-    email,
-    address,
-    salonDetails
-  } = req.body;
+  const { full_name, phone_number, email, address, salonDetails } = req.body;
 
   try {
-    // Update admin fields
+    // 1️⃣ Check if admin exists
     const admin = await Admin.findById(id);
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
-    // Check for duplicate phone_number or email (excluding current admin)
+
+    // 2️⃣ Validate unique phone_number & email (excluding current admin)
     if (phone_number) {
       const existingPhone = await Admin.findOne({ phone_number, _id: { $ne: id } });
       if (existingPhone) {
@@ -510,35 +516,57 @@ router.put("/update-admin/:id", upload.single("image"), async (req, res) => {
         return res.status(400).json({ message: "Email already in use by another admin" });
       }
     }
+
+    // 3️⃣ Update Admin basic details
     admin.full_name = full_name || admin.full_name;
     admin.phone_number = phone_number || admin.phone_number;
     admin.email = email || admin.email;
     admin.address = address || admin.address;
-    // Do not update package_id
     await admin.save();
 
-    // Update salon fields
+    // 4️⃣ Parse salonDetails (can be stringified JSON or object)
     let parsedSalonDetails = {};
     if (salonDetails) {
       parsedSalonDetails = typeof salonDetails === "string" ? JSON.parse(salonDetails) : salonDetails;
     }
+
+    // 5️⃣ Find linked salon
     const salon = await Salon.findOne({ signup_id: admin._id });
     if (!salon) {
       return res.status(404).json({ message: "Salon not found" });
     }
-    // If image is uploaded, add to salonDetails
+
+    // 6️⃣ If image uploaded, store in MongoDB as buffer (centralized image logic)
     if (req.file) {
-      parsedSalonDetails.image = `/uploads/${req.file.filename}`;
+      parsedSalonDetails.image = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      };
     }
-    // Update salon fields from parsedSalonDetails
-    Object.keys(parsedSalonDetails).forEach(key => {
+
+    // 7️⃣ Update salon fields
+    Object.keys(parsedSalonDetails).forEach((key) => {
       salon[key] = parsedSalonDetails[key];
     });
+
     await salon.save();
 
-    res.status(200).json({ message: "Admin and salon updated successfully", admin, salon });
+    // 8️⃣ Prepare clean response with image_url instead of raw buffer
+    const salonObj = salon.toObject();
+    salonObj.image_url = salon.image?.data
+      ? `/api/salons/image/${salon._id}.${salon.image?.extension || "jpg"}`
+      : null;
+    delete salonObj.image;
+
+    res.status(200).json({
+      message: "Admin and salon updated successfully",
+      admin,
+      salon: salonObj,
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Update Admin Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 });

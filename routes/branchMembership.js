@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const BranchMembership = require('../models/BranchMembership');
+const BranchMembership = require('../models/branchMembership');
 
 // create Branch Membership
 router.post('/', async(req, res) => {

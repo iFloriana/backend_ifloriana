@@ -14,7 +14,8 @@ router.get("/", async (req, res) => {
   try {
     const customerPackages = await CustomerPackage.find({ salon_id })
       .populate("customer_id", "full_name email phone_number image")
-      .populate("package_details.service_id", "name price");
+      .populate("package_details.service_id", "name price")
+      .populate("branch_package_id", "package_name");
 
     res.status(200).json({ success: true, data: customerPackages });
   } catch (error) {
@@ -28,7 +29,8 @@ router.get("/by-customer/:customer_id", async (req, res) => {
   try {
     const packages = await CustomerPackage.find({ customer_id: req.params.customer_id })
       .populate("package_details.service_id", "name")
-      .populate("branch_id", "name");
+      .populate("branch_id", "name")
+      .populate("branch_package_id", "package_name");
 
     res.status(200).json({ success: true, data: packages });
   } catch (error) {

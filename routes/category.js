@@ -3,32 +3,46 @@ const Category = require("../models/Category");
 const router = express.Router();
 const mongoose = require("mongoose");
 const getUploader = require("../middleware/imageUpload");
-const upload = getUploader("category_images");
+const upload = getUploader();
+const path = require("path");
 
-// Create Category with salon_id validation
+// ------------------- POST: Create Category -------------------
 router.post("/", upload.single("image"), async (req, res) => {
   const { salon_id, name, status } = req.body;
-  const image = req.file ? req.file.path.replace(/\\/g, '/'): null;
 
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
+  if (!salon_id || !name) {
+    return res.status(400).json({ message: "salon_id and name are required" });
   }
 
   try {
+    const image = req.file
+      ? {
+          data: req.file.buffer,
+          contentType: req.file.mimetype,
+          originalName: req.file.originalname,
+          extension: path.extname(req.file.originalname).slice(1)
+        }
+      : undefined;
+
     const newCategory = new Category({
       salon_id,
       name,
-      image,
       status,
+      image
     });
+
     await newCategory.save();
-    res.status(201).json({ message: "Category created successfully", data: newCategory });
+
+    res.status(201).json({
+      message: "Category created successfully",
+      data: newCategory
+    });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get all categories with salon_id filter
+// ------------------- GET: All Categories -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -38,13 +52,23 @@ router.get("/", async (req, res) => {
 
   try {
     const categories = await Category.find({ salon_id }).populate("salon_id");
-    res.status(200).json({ message: "Categories fetched successfully", data: categories });
+
+    const data = categories.map((category) => {
+      const obj = category.toObject();
+      obj.image_url = category.image?.data
+        ? `/api/categories/image/${category._id}.${category.image.extension || "jpg"}`
+        : null;
+      delete obj.image;
+      return obj;
+    });
+
+    res.status(200).json({ message: "Categories fetched successfully", data });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get Category Names and IDs by Salon ID
+// ------------------- GET: Category Names & IDs -------------------
 router.get("/names", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -54,65 +78,117 @@ router.get("/names", async (req, res) => {
 
   try {
     const categoryNamesAndIds = await Category.find({ salon_id }, { name: 1 });
-    res.status(200).json({ message: "Category names and IDs fetched successfully", data: categoryNamesAndIds });
+    res.status(200).json({
+      message: "Category names and IDs fetched successfully",
+      data: categoryNamesAndIds
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Get Single Category
+// ------------------- GET: Single Category -------------------
 router.get("/:id", async (req, res) => {
-  const { id } = req.params;
-
   try {
-    const category = await Category.findById(id).populate("salon_id");
+    const category = await Category.findById(req.params.id).populate("salon_id");
+
     if (!category) {
       return res.status(404).json({ message: "Category not found" });
     }
-    res.status(200).json({ message: "Category fetched successfully", data: category });
+
+    const obj = category.toObject();
+    obj.image_url = category.image?.data
+      ? `/api/categories/image/${category._id}.${category.image.extension || "jpg"}`
+      : null;
+    delete obj.image;
+
+    res.status(200).json({
+      message: "Category fetched successfully",
+      data: obj
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Update Category
-router.put("/:id",upload.single("image"), async (req, res) => {
-  const { id } = req.params;
-  const updateData = { ...req.body };
-
+// ------------------- PUT: Update Category -------------------
+router.put("/:id", upload.single("image"), async (req, res) => {
   try {
+    const updateData = { ...req.body };
+
     if (req.file) {
-      updateData.image = req.file.path.replace(/\\/g, '/');
+      updateData.image = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1)
+      };
     }
 
-    const updatedCategory = await Category.finfdByIdAndUpdate(id, updateData, { new: true });
+    const updatedCategory = await Category.findByIdAndUpdate(req.params.id, updateData, {
+      new: true
+    });
 
     if (!updatedCategory) {
       return res.status(404).json({ message: "Category not found" });
     }
 
-    res.status(200).json({ message: "Category updated successfully", data: updatedCategory });
+    const obj = updatedCategory.toObject();
+    obj.image_url = updatedCategory.image?.data
+      ? `/api/categories/image/${updatedCategory._id}.${updatedCategory.image.extension || "jpg"}`
+      : null;
+    delete obj.image;
+
+    res.status(200).json({
+      message: "Category updated successfully",
+      data: obj
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
-// Delete Category
-router.delete("/:id", async (req, res) => {
-  const { id } = req.params;
-
+// ------------------- GET: Serve Image Preview -------------------
+router.get("/image/:filename", async (req, res) => {
   try {
-    const deletedCategory = await Category.findByIdAndDelete(id);
+    const id = req.params.filename.split(".")[0];
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid category ID" });
+    }
+
+    const category = await Category.findById(id);
+
+    if (!category || !category.image?.data) {
+      return res.status(404).json({ message: "Image not found" });
+    }
+
+    const contentType = category.image.contentType || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", "inline");
+
+    const buffer = Buffer.isBuffer(category.image.data)
+      ? category.image.data
+      : Buffer.from(category.image.data);
+
+    res.send(buffer);
+  } catch (error) {
+    console.error("Image fetch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ------------------- DELETE: Category -------------------
+router.delete("/:id", async (req, res) => {
+  try {
+    const deletedCategory = await Category.findByIdAndDelete(req.params.id);
     if (!deletedCategory) {
       return res.status(404).json({ message: "Category not found" });
     }
+
     res.status(200).json({ message: "Category deleted successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

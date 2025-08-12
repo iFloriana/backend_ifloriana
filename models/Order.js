@@ -58,7 +58,21 @@ const OrderSchema = new mongoose.Schema({
         ref: "Staff",
         required: false // Optional
     },
-
+    date: {
+        type: Date,
+        required: false,
+    },
+    additional_discount_type: {
+        type: String,
+        enum: ["percentage", "fixed"],
+        default: "fixed",
+        required: false
+    },
+    additional_discount: {
+        type: Number,
+        default: 0,
+        required: false
+    },
     order_code: {
         type: String,
         unique: true

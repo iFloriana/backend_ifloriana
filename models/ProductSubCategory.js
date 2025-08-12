@@ -10,8 +10,10 @@ const ProductSubCategorySchema = new mongoose.Schema({
       }
     ],
   image: {
-    type: String,
-    required: false,
+    data: Buffer,
+    contentType: String,
+    originalName: String,
+    extension: String,
   },
   name: {
     type: String,

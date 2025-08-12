@@ -11,7 +11,12 @@ const CustomerPackageSchema = new mongoose.Schema({
     ref: "Salon",
     required: true
   },
-  package_name: String,
+  branch_package_id: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BranchPackage",
+    }
+  ],
   description: String,
   package_price: Number,
   start_date: Date,

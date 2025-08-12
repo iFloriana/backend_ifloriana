@@ -9,15 +9,17 @@ const ProductSchema = new mongoose.Schema({
     }
   ],
   image: {
-    type: String,
-    required: false,
+    data: Buffer,
+    contentType: String,
+    originalName: String,
+    extension: String,
   },
   product_name: {
     type: String,
     required: true,
   },
   description: {
-    type: String,
+    type: String, 
     required: true,
   },
   brand_id: {
@@ -55,25 +57,6 @@ const ProductSchema = new mongoose.Schema({
   code: {
     type: String,
     required: false
-  },
-  product_discount: {
-    start_date: {
-      type: Date,
-      required: false
-    },
-    end_date: {
-      type: Date,
-      required: false
-    },
-    discount_amount: {
-      type: Number,
-      required: false
-    },
-    discount_type: {
-      type: String,
-      enum: ["percent", "fixed"],
-      required: false
-    },
   },
   status: {
     type: Number,

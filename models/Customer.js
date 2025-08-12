@@ -2,8 +2,10 @@ const mongoose = require("mongoose");
 
 const CustomerSchema = new mongoose.Schema({
   image: {
-    type: String,
-    required: false,
+    data: Buffer,
+    contentType: String,
+    originalName: String,
+    extension: String,
   },
   full_name: {
     type: String,

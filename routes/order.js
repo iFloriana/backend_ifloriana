@@ -1,32 +1,30 @@
+// Required modules
+const express = require("express");
+const router = express.Router();
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
+const Order = require("../models/Order");
+const Product = require("../models/Product");
 
-// Helper to generate PDF invoice and return file path
+// ----------------- Helper: Generate PDF Invoice --------------------
 function generateOrderInvoicePDF(invoice, order_code) {
-  const PDFDocument = require("pdfkit");
-  const fs = require("fs");
-  const path = require("path");
-
   const doc = new PDFDocument({ margin: 50 });
   const fileName = `invoice-${order_code}.pdf`;
   const filePath = path.join(__dirname, "../uploads", fileName);
   const stream = fs.createWriteStream(filePath);
   doc.pipe(stream);
-  //-------------------------------- Header --------------------------------   
+
   const salon = invoice.salon || {};
   const branch = invoice.branch || {};
+  const customer = invoice.customer || {};
+
+  // Header
   doc.fontSize(22).font("Helvetica-Bold").text(salon.salon_name || "-", { align: "center" });
   doc.fontSize(14).text(branch.name || "-", { align: "center" });
-
-  const address = branch.address || salon.address || "-";
-  doc.fontSize(10).font("Helvetica").text(address, { align: "center" });
-
-  const phone = branch.contact_number || salon.contact_number || "-";
-  const email = branch.contact_email || salon.contact_email || "-";
-  doc.text(`Phone: ${phone}`, { align: "center" });
-  doc.text(`Email: ${email}`, { align: "center" });
-
+  doc.fontSize(10).font("Helvetica").text(branch.address || salon.address || "-", { align: "center" });
+  doc.text(`Phone: ${branch.contact_number || salon.contact_number || "-"}`, { align: "center" });
+  doc.text(`Email: ${branch.contact_email || salon.contact_email || "-"}`, { align: "center" });
   doc.moveDown(1);
 
   // Invoice Title
@@ -34,18 +32,28 @@ function generateOrderInvoicePDF(invoice, order_code) {
   doc.moveDown(1);
 
   // Order Info
-  const customer = invoice.customer || {};
   doc.fontSize(11);
   doc.font("Helvetica-Bold").text(`Order Code: `, { continued: true }).font("Helvetica").text(invoice.order_code || "-");
   doc.font("Helvetica-Bold").text(`Customer: `, { continued: true }).font("Helvetica").text(customer.full_name || customer.name || "-");
-  doc.font("Helvetica-Bold").text(`Phone: `, { continued: true }).font("Helvetica").text(customer.phone_number || "-", { continued: false });
-  doc.font("Helvetica-Bold").text(`Date: `, { continued: true }).font("Helvetica").text(new Date(invoice.createdAt).toLocaleString());
-  
-  if (invoice.staff) {
-    const staffName = invoice.staff.full_name || invoice.staff.name || "-";
-    doc.font("Helvetica-Bold").text(`Staff: `, { continued: true }).font("Helvetica").text(staffName);
+  doc.font("Helvetica-Bold").text(`Phone: `, { continued: true }).font("Helvetica").text(customer.phone_number || "-");
+
+  // Optional Date
+  if (invoice.date) {
+    const formattedDate = new Date(invoice.date).toLocaleDateString("en-CA"); // YYYY-MM-DD
+    doc.font("Helvetica-Bold").text(`Date: `, { continued: true }).font("Helvetica").text(formattedDate);
   }
-  
+
+  // Generated-Date
+  if (invoice.createdAt) {
+    const generatedDate = new Date(invoice.createdAt).toLocaleDateString("en-CA"); // YYYY-MM-DD
+    doc.font("Helvetica-Bold").text(`Generated-Date: `, { continued: true }).font("Helvetica").text(generatedDate);
+  }
+
+  // Optional Staff
+  if (invoice.staff) {
+    doc.font("Helvetica-Bold").text(`Staff: `, { continued: true }).font("Helvetica").text(invoice.staff.full_name || invoice.staff.name || "-");
+  }
+
   doc.moveDown(1);
 
   // Products Section
@@ -53,53 +61,49 @@ function generateOrderInvoicePDF(invoice, order_code) {
   doc.moveDown(0.5);
   doc.fontSize(10).font("Helvetica");
 
-  if (invoice.products && invoice.products.length > 0) {
-    // Define column X positions
-    const startX = 50;
-    const qtyX = 250;
-    const unitPriceX = 330;
-    const totalX = 420;
+  const startX = 50, qtyX = 250, unitPriceX = 330, totalX = 420;
+  doc.font("Helvetica-Bold").text("Product", startX).text("Qty", qtyX).text("Unit Price", unitPriceX).text("Total", totalX);
+  doc.moveDown(0.2);
+  doc.moveTo(startX, doc.y).lineTo(550, doc.y).stroke();
+  doc.moveDown(0.3);
 
-    // Table Headers
-    const yStart = doc.y;
-    doc.font("Helvetica-Bold");
-    doc.text("Product", startX, yStart);
-    doc.text("Qty", qtyX, yStart);
-    doc.text("Unit Price", unitPriceX, yStart);
-    doc.text("Total", totalX, yStart);
-    doc.moveDown(0.2);
-    doc.moveTo(startX, doc.y).lineTo(550, doc.y).stroke();
-    doc.moveDown(0.3);
-
-    doc.font("Helvetica");
-
-    // Table Rows
-    invoice.products.forEach((p) => {
-      const prod = p.product || {};
-      const y = doc.y;
-      doc.text(prod.product_name || prod.name || "-", startX, y);
-      doc.text(p.quantity?.toString() || "-", qtyX, y);
-      doc.text(p.unit_price?.toFixed(2) || "-", unitPriceX, y);
-      doc.text(p.total_price?.toFixed(2) || "-", totalX, y);
-      doc.moveDown(0.5);
-    });
-  } else {
-    doc.text("No products.");
-  }
+  (invoice.products || []).forEach(p => {
+    const prod = p.product || {};
+    const y = doc.y;
+    doc.font("Helvetica").text(prod.product_name || prod.name || "-", startX, y);
+    doc.text(p.quantity?.toString() || "-", qtyX, y);
+    doc.text(p.unit_price?.toFixed(2) || "-", unitPriceX, y);
+    doc.text(p.total_price?.toFixed(2) || "-", totalX, y);
+    doc.moveDown(0.5);
+  });
 
   // Summary Section
   doc.moveDown(1);
   doc.fontSize(12).font("Helvetica-Bold").text("Summary", { underline: true });
   doc.moveDown(0.5);
-  const total = invoice.total_price?.toFixed(2) || "0.00";
-  doc.font("Helvetica").fontSize(10)
-    .text(`Subtotal: ₹${total}`, { align: "right" })
-    .text(`Total Payable: ₹${total}`, { align: "right" });
-  doc.moveDown(2);
+
+  const subtotal = (invoice.products || []).reduce((sum, p) => sum + p.total_price, 0);
+  doc.text(`Subtotal: ₹${subtotal.toFixed(2)}`, { align: "right" });
+
+  if (invoice.additional_discount && invoice.additional_discount > 0) {
+    const label = invoice.additional_discount_type === "percentage"
+      ? `Discount (${invoice.additional_discount}%)`
+      : `Discount`;
+
+    const discountAmount = invoice.additional_discount_type === "percentage"
+      ? subtotal * (invoice.additional_discount / 100)
+      : invoice.additional_discount;
+
+    doc.text(`${label}: -₹${discountAmount.toFixed(2)}`, { align: "right" });
+    doc.text(`Total Payable: ₹${(subtotal - discountAmount).toFixed(2)}`, { align: "right" });
+  } else {
+    doc.text(`Total Payable: ₹${subtotal.toFixed(2)}`, { align: "right" });
+  }
 
   // Footer
+  doc.moveDown(2);
   doc.fontSize(9).font("Helvetica-Oblique").text("Thank you for choosing us!", { align: "center" });
-  doc.font("Helvetica-Oblique").text("This is a system-generated invoice.", { align: "center" });
+  doc.text("This is a system-generated invoice.", { align: "center" });
 
   doc.end();
 
@@ -109,15 +113,18 @@ function generateOrderInvoicePDF(invoice, order_code) {
   });
 }
 
-// Helper to build invoice object for an order
+// ----------------- Helper: Build invoice object --------------------
 function buildOrderInvoice(order) {
   return {
     order_id: order._id,
     order_code: order.order_code,
     createdAt: order.createdAt,
+    date: order.date || null,
     salon: order.salon_id,
     branch: order.branch_id,
     customer: order.customer_id,
+    additional_discount_type: order.additional_discount_type || null,
+    additional_discount: order.additional_discount || 0,
     payment_method: order.payment_method,
     total_price: order.total_price,
     products: (order.products || []).map(p => ({
@@ -127,40 +134,51 @@ function buildOrderInvoice(order) {
       unit_price: p.unit_price,
       total_price: p.total_price
     })),
-    ...(order.staff_id ? { staff: order.staff_id } : {}) //conditionally include staff
+    ...(order.staff_id ? { staff: order.staff_id } : {})
   };
 }
-const express = require("express");
-const router = express.Router();
-const Order = require("../models/Order");
-const Product = require("../models/Product");
 
 // POST: Create a new order (buy products)
 router.post("/", async (req, res) => {
   try {
-    const { salon_id, branch_id, products, customer_id, payment_method, staff_id } = req.body;
+    const {
+      salon_id,
+      branch_id,
+      products,
+      customer_id,
+      payment_method,
+      staff_id,
+      date,
+      additional_discount_type,
+      additional_discount
+    } = req.body;
 
     if (!salon_id || !branch_id || !Array.isArray(products) || products.length === 0 || !customer_id || !payment_method) {
       return res.status(400).json({ message: "Missing required fields or products array is empty" });
     }
 
     let total_price = 0;
-
     const orderProducts = [];
 
+    // Process each product
     for (const item of products) {
       const { product_id, variant_id, quantity } = item;
       const qty = parseInt(quantity);
+
       if (!product_id || isNaN(qty) || qty < 1) {
         return res.status(400).json({ message: "Invalid product or quantity" });
       }
+
       const product = await Product.findById(product_id);
       if (!product) return res.status(404).json({ message: `Product not found: ${product_id}` });
+
       let unit_price;
+
       if (variant_id) {
         const variant = product.variants.find(v => v._id.toString() === variant_id);
         if (!variant) return res.status(404).json({ message: `Variant not found for product: ${product_id}` });
         unit_price = variant.price;
+
         if (variant.stock !== undefined) {
           if (variant.stock < qty) {
             return res.status(400).json({ message: `Not enough stock for variant of product: ${product_id}` });
@@ -169,6 +187,7 @@ router.post("/", async (req, res) => {
         }
       } else {
         unit_price = product.price;
+
         if (product.stock !== undefined) {
           if (product.stock < qty) {
             return res.status(400).json({ message: `Not enough stock for product: ${product_id}` });
@@ -179,22 +198,44 @@ router.post("/", async (req, res) => {
 
       const line_total = unit_price * qty;
       total_price += line_total;
-      orderProducts.push({ product_id, variant_id: variant_id || null, quantity: qty, unit_price, total_price: line_total });
+
+      orderProducts.push({
+        product_id,
+        variant_id: variant_id || null,
+        quantity: qty,
+        unit_price,
+        total_price: line_total
+      });
+
       await product.save();
     }
+
+    // ✅ Apply discount AFTER total_price is known
+    let discount = 0;
+    if (additional_discount_type === "percentage") {
+      discount = total_price * (additional_discount / 100);
+    } else if (additional_discount_type === "fixed") {
+      discount = additional_discount;
+    }
+
+    const final_price = total_price - discount;
 
     const order = new Order({
       salon_id,
       branch_id,
       products: orderProducts,
       customer_id,
-      total_price,
+      total_price: final_price,
       payment_method,
       staff_id,
+      date: date || undefined,
+      additional_discount_type,
+      additional_discount
     });
+
     await order.save();
 
-    // Populate for invoice
+    // Populate references for invoice
     await order.populate([
       { path: "salon_id" },
       { path: "branch_id" },
@@ -205,7 +246,6 @@ router.post("/", async (req, res) => {
     ]);
 
     const invoice = buildOrderInvoice(order);
-
     const pdfFileName = await generateOrderInvoicePDF(invoice, order.order_code);
 
     res.status(201).json({
@@ -215,6 +255,7 @@ router.post("/", async (req, res) => {
       invoice,
       invoice_pdf_url: `/api/uploads/${pdfFileName}`
     });
+
   } catch (error) {
     res.status(500).json({ message: "Error creating order", error: error.message });
   }
@@ -269,6 +310,7 @@ router.get("/", async (req, res) => {
   }
 });
 
+
 // get orders by branch_id
 router.get("/by-branch", async (req, res) => {
   try {
@@ -291,7 +333,7 @@ router.get("/by-branch", async (req, res) => {
       .populate("salon_id")
       .populate("staff_id");
 
-    const ordersWithInvoices = await Promise.all(orders.map(async order => { 
+    const ordersWithInvoices = await Promise.all(orders.map(async order => {
       const obj = order.toObject();
       obj.ProductCount = obj.products ? obj.products.length : 0;
       obj.order_code = order.order_code;
@@ -397,6 +439,7 @@ router.put("/:id", async (req, res) => {
       { path: "salon_id" },
       { path: "branch_id" },
       { path: "customer_id" },
+      { path: "staff_id" },
       { path: "products.product_id" },
       { path: "products.variant_id" }
     ]);

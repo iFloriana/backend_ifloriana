@@ -2,8 +2,41 @@ const express = require("express");
 const Branch = require("../models/Branch");
 const Staff = require("../models/Staff");
 const router = express.Router();
-const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
-const upload = getUploader("branch_images"); // ✅ Specify the folder for branch images
+const getUploader = require("../middleware/imageUpload");
+const upload = getUploader();
+const path = require("path");
+const mongoose = require("mongoose");
+
+// Helper to transform product, brand, category, and branch image fields
+function transformProduct(product, req) {
+  const obj = product.toObject();
+
+  // Helper to handle any populated image field
+  const handleImageField = (field, route) => {
+    if (obj[field] && obj[field].image?.data) {
+      obj[field].image_url = `${route}/${obj[field]._id}.${obj[field].image.extension || "jpg"}`;
+      delete obj[field].image;
+    }
+  };
+
+  // Product image
+  obj.image_url = product.image?.data
+    ? `/api/products/image/${product._id}.${product.image.extension || "jpg"}`
+    : null;
+  delete obj.image;
+
+  // Brand image
+  handleImageField("brand_id", "/api/brands/image");
+
+  // Category image
+  handleImageField("category_id", "/api/productCategories/image");
+
+  // ✅ Salon image
+  handleImageField("salon_id", "/api/salons/image");
+
+  return obj;
+}
+
 
 // ------------------- POST: Create Branch -------------------
 router.post("/", upload.single("image"), async (req, res) => {
@@ -16,9 +49,13 @@ router.post("/", upload.single("image"), async (req, res) => {
   try {
     const branchData = { ...req.body };
 
-    // ✅ Set image path if image is uploaded
     if (req.file) {
-      branchData.image = req.file.path.replace(/\\/g, "/");
+      branchData.image = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      };
     }
 
     const newBranch = new Branch(branchData);
@@ -34,22 +71,23 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
-
 // ------------------- PUT: Update Branch -------------------
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const updateData = { ...req.body };
 
-    // ✅ Set new image path if uploaded
     if (req.file) {
-      updateData.image = req.file.path.replace(/\\/g, "/");
+      updateData.image = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      };
     }
 
-    const updatedBranch = await Branch.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
+    const updatedBranch = await Branch.findByIdAndUpdate(req.params.id, updateData, {
+      new: true,
+    });
 
     if (!updatedBranch) {
       return res.status(404).json({ message: "Branch not found" });
@@ -61,7 +99,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-
 
 // ------------------- GET: All Branches -------------------
 router.get("/", async (req, res) => {
@@ -96,10 +133,24 @@ router.get("/", async (req, res) => {
       if (_id) countMap[_id.toString()] = count;
     });
 
-    const branchData = branches.map((branch) => ({
-      ...branch.toObject(),
-      staff_count: countMap[branch._id.toString()] || 0,
-    }));
+    const branchData = branches.map((branch) => {
+      const obj = branch.toObject();
+      obj.staff_count = countMap[branch._id.toString()] || 0;
+
+      // Branch image
+      if (branch.image?.data) {
+        obj.image_url = `/api/branches/image/${branch._id}.${branch.image.extension || "jpg"}`;
+      }
+      delete obj.image;
+
+      // ✅ Salon image
+      if (obj.salon_id && obj.salon_id.image?.data) {
+        obj.salon_id.image_url = `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`;
+        delete obj.salon_id.image;
+      }
+
+      return obj;
+    });
 
     res.status(200).json({
       message: "Branches fetched successfully",
@@ -110,7 +161,6 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
-
 
 // ------------------- GET: Branch Names -------------------
 router.get("/names", async (req, res) => {
@@ -132,7 +182,6 @@ router.get("/names", async (req, res) => {
   }
 });
 
-
 // ------------------- GET: Single Branch -------------------
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
@@ -148,10 +197,24 @@ router.get("/:id", async (req, res) => {
 
     const staffCount = await Staff.countDocuments({ branch_id: id });
 
+    const obj = branch.toObject();
+
+    // Branch image
+    if (branch.image?.data) {
+      obj.image_url = `/api/branches/image/${branch._id}.${branch.image.extension || "jpg"}`;
+    }
+    delete obj.image;
+
+    // ✅ Salon image
+    if (obj.salon_id && obj.salon_id.image?.data) {
+      obj.salon_id.image_url = `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`;
+      delete obj.salon_id.image;
+    }
+
     res.status(200).json({
       message: "Branch fetched successfully",
       data: {
-        ...branch.toObject(),
+        ...obj,
         staff_count: staffCount,
       },
     });
@@ -161,6 +224,35 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ------------------- GET: Branch Image (preview inline) -------------------
+router.get("/image/:filename", async (req, res) => {
+  try {
+    const id = req.params.filename.split(".")[0];
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid branch ID" });
+    }
+
+    const branch = await Branch.findById(id);
+
+    if (!branch || !branch.image?.data) {
+      return res.status(404).json({ message: "Image not found" });
+    }
+
+    const contentType = branch.image.contentType || "image/jpeg";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", "inline");
+
+    const buffer = Buffer.isBuffer(branch.image.data)
+      ? branch.image.data
+      : Buffer.from(branch.image.data);
+
+    res.send(buffer);
+  } catch (error) {
+    console.error("Image fetch error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 // ------------------- DELETE: Branch -------------------
 router.delete("/:id", async (req, res) => {
