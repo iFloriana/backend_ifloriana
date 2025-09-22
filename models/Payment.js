@@ -73,7 +73,24 @@ const PaymentSchema = new mongoose.Schema({
   },
   payment_method: {
     type: String,
-    required: true
+    enum: ["Cash", "Card", "UPI", "Split"],
+    required: true,
+  },
+  payment_split: [
+    {
+      method: {
+        type: String,
+        enum: ["cash", "card", "upi"],
+      },
+      amount: {
+        type: Number,
+      }
+    }
+  ],
+  invoice_format: {
+    type: String,
+    enum: ["fullpage", "receipt", "halfpage", "gst_invoice"],
+    default: "gst_invoice"
   },
   createdAt: {
     type: Date,

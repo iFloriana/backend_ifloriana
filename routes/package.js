@@ -5,7 +5,7 @@ const SuperAdminPackage = require('../models/SuperAdminPackage');
 // Get all packages
 router.get('/', async (req, res) => {
   try {
-    const packages = await SuperAdminPackage.find(); 
+    const packages = await SuperAdminPackage.find();
     res.json(packages);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching packages', error });

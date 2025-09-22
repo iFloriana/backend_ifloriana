@@ -4,7 +4,7 @@ const router = express.Router();
 const Admin = require('../models/Admin');
 const Salon = require('../models/Salon');
 const bcrypt = require('bcryptjs');
-const mongoose = require("mongoose"); 
+const mongoose = require("mongoose");
 const path = require("path");
 const getUploader = require("../middleware/imageUpload");
 const upload = getUploader(); // Multer config
@@ -12,7 +12,7 @@ const upload = getUploader(); // Multer config
 // Get all admins
 router.get("/all", async (req, res) => {
   try {
-    const admins = await Admin.find().populate("package_id");
+    const admins = await Admin.find().populate("package_id.package_id");
     res.status(200).json(admins);
   } catch (error) {
     res.status(500).json({ message: "Server error", error });
@@ -95,24 +95,10 @@ router.put('/:id', upload.single("image"), async (req, res) => {
   }
 });
 
-// Delete admin by ID
-router.delete("/:id", async (req, res) => {
-  try {
-    const deletedAdmin = await Admin.findByIdAndDelete(req.params.id);
-    if (!deletedAdmin) {
-      return res.status(404).json({ message: "Admin not found" });
-    }
-
-    res.status(200).json({ message: "Admin deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error });
-  }
-});
-
 // Get single admin by ID
 router.get("/:id", async (req, res) => {
   try {
-    const admin = await Admin.findById(req.params.id).populate("package_id");
+    const admin = await Admin.findById(req.params.id).populate("package_id.package_id");
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
@@ -141,6 +127,20 @@ router.get("/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching admin and salon:", error);
+    res.status(500).json({ message: "Server error", error });
+  }
+});
+
+// Delete admin by ID
+router.delete("/:id", async (req, res) => {
+  try {
+    const deletedAdmin = await Admin.findByIdAndDelete(req.params.id);
+    if (!deletedAdmin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    res.status(200).json({ message: "Admin deleted successfully" });
+  } catch (error) {
     res.status(500).json({ message: "Server error", error });
   }
 });

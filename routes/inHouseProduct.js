@@ -62,6 +62,36 @@ router.post("/", async (req, res) => {
   }
 });
 
+// ===== Helpers =====
+
+// ✅ Clean staff object
+function transformStaff(staff, req) {
+  if (!staff) return staff;
+  const staffObj = staff.toObject ? staff.toObject() : staff;
+
+  staffObj.image_url = staffObj.image?.data
+    ? `${req.protocol}://${req.get("host")}/api/staffs/image/${staffObj._id}.${staffObj.image?.extension || "jpg"}`
+    : null;
+
+  delete staffObj.image;
+  return staffObj;
+}
+
+// ✅ Clean product object
+function transformProduct(product, req) {
+  if (!product) return product;
+  const productObj = product.toObject ? product.toObject() : product;
+
+  productObj.image_url = productObj.image?.data
+    ? `${req.protocol}://${req.get("host")}/api/products/image/${productObj._id}.${productObj.image?.extension || "jpg"}`
+    : null;
+
+  delete productObj.image;
+  return productObj;
+}
+
+// ===== ROUTES =====
+
 // GET all usage records filtered by salon_id
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
@@ -70,14 +100,12 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    // Step 1: Fetch all records with product_id populated
     const records = await InHouseProduct.find({ salon_id })
       .populate("product.product_id")
       .populate("staff_id")
       .populate("salon_id", "salon_name")
       .populate("branch_id", "name");
 
-    // Step 2: Manually attach actual variant data to each product entry
     const updatedRecords = records.map(record => {
       const resolvedProducts = record.product.map(p => {
         const productDoc = p.product_id;
@@ -86,14 +114,15 @@ router.get("/", async (req, res) => {
         );
         return {
           ...p.toObject(),
-          product_id: productDoc,
+          product_id: transformProduct(productDoc, req), // ✅ fix product image
           variant: matchedVariant || null
         };
       });
 
       return {
         ...record.toObject(),
-        product: resolvedProducts
+        product: resolvedProducts,
+        staff_id: transformStaff(record.staff_id, req) // ✅ fix staff image
       };
     });
 
@@ -103,6 +132,7 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET records by branch
 router.get("/by-branch", async (req, res) => {
   const { salon_id, branch_id } = req.query;
 
@@ -111,10 +141,7 @@ router.get("/by-branch", async (req, res) => {
   }
 
   try {
-    const records = await InHouseProduct.find({
-      salon_id,
-      branch_id
-    })
+    const records = await InHouseProduct.find({ salon_id, branch_id })
       .populate("product.product_id")
       .populate("staff_id")
       .populate("salon_id", "salon_name")
@@ -128,14 +155,15 @@ router.get("/by-branch", async (req, res) => {
         );
         return {
           ...p.toObject(),
-          product_id: productDoc,
+          product_id: transformProduct(productDoc, req), // ✅ fix product image
           variant: matchedVariant || null
         };
       });
 
       return {
         ...record.toObject(),
-        product: resolvedProducts
+        product: resolvedProducts,
+        staff_id: transformStaff(record.staff_id, req) // ✅ fix staff image
       };
     });
 
@@ -156,7 +184,6 @@ router.get("/:id", async (req, res) => {
 
     if (!record) return res.status(404).json({ message: "Record not found" });
 
-    // For each product entry, attach the actual variant object
     const resolvedProducts = record.product.map(p => {
       const productDoc = p.product_id;
       const matchedVariant = productDoc?.variants?.find(
@@ -164,7 +191,7 @@ router.get("/:id", async (req, res) => {
       );
       return {
         ...p.toObject(),
-        product_id: productDoc,
+        product_id: transformProduct(productDoc, req), // ✅ fix product image
         variant: matchedVariant || null
       };
     });
@@ -173,7 +200,8 @@ router.get("/:id", async (req, res) => {
       message: "Record fetched",
       data: {
         ...record.toObject(),
-        product: resolvedProducts
+        product: resolvedProducts,
+        staff_id: transformStaff(record.staff_id, req) // ✅ fix staff image
       }
     });
   } catch (err) {

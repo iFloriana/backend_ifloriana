@@ -6,23 +6,37 @@ const Appointment = require("../models/Appointment");
 const Staff = require("../models/Staff");
 const Payment = require("../models/Payment");
 const RevenueCommission = require("../models/RevenueCommission");
-const StaffPayment = require("../models/StaffPayment"); 
+const StaffPayment = require("../models/StaffPayment");
 
 // GET /staff-earning
 router.get("/", async (req, res) => {
   try {
     const { salon_id } = req.query;
-    const allStaff = await Staff.find({ salon_id });
+    if (!salon_id) {
+      return res.status(400).json({ success: false, message: "salon_id is required" });
+    }
+
+    const allStaff = await Staff.find({ salon_id }).lean();
     const earningsList = [];
 
     for (const staff of allStaff) {
       const staff_id = staff._id;
-      const staff_image = staff.image;
 
+      // ✅ load last earning_start_date
+      const staffEarningDoc = await StaffEarning.findOne({ staff_id, salon_id });
+      const earningStartDate = staffEarningDoc?.earning_start_date || new Date(0); // if not exist, take all time
+
+      // ✅ Correct staff image url
+      const staff_image_url = staff.image?.data
+        ? `/api/staffs/image/${staff._id}.${staff.image.extension || "jpg"}`
+        : null;
+
+      // ✅ filter appointments only after last payout
       const appointments = await Appointment.find({
         status: "check-out",
         salon_id,
-        "services.staff_id": staff_id
+        "services.staff_id": staff_id,
+        createdAt: { $gte: earningStartDate }
       });
 
       const total_booking = appointments.length;
@@ -39,9 +53,11 @@ router.get("/", async (req, res) => {
         });
       });
 
+      // === tips calculation ===
       let tip_earning = 0;
       const appointmentIds = appointments.map((apt) => apt._id);
       const payments = await Payment.find({ appointment_id: { $in: appointmentIds } }).lean();
+
       for (const pay of payments) {
         if (pay.tips && pay.appointment_id) {
           const apt = appointments.find(a => a._id.toString() === pay.appointment_id.toString());
@@ -58,6 +74,7 @@ router.get("/", async (req, res) => {
         }
       }
 
+      // === commission calculation ===
       let commission_earning = 0;
       const commissionId = staff.assigned_commission_id || staff.commission_id;
 
@@ -74,9 +91,10 @@ router.get("/", async (req, res) => {
             });
 
             if (matchingSlot) {
-              const commissionValue = revComm.commission_type === "Percentage"
-                ? (amount * matchingSlot.amount) / 100
-                : matchingSlot.amount;
+              const commissionValue =
+                revComm.commission_type === "Percentage"
+                  ? (amount * matchingSlot.amount) / 100
+                  : matchingSlot.amount;
 
               commission_earning += commissionValue;
 
@@ -84,28 +102,21 @@ router.get("/", async (req, res) => {
                 {
                   _id: entry.apt_id,
                   "services.service_id": entry.service_id,
-                  "services.staff_id": staff_id
+                  "services.staff_id": staff_id,
                 },
-                {
-                  $set: {
-                    "services.$.commission_earned": commissionValue
-                  }
-                }
+                { $set: { "services.$.commission_earned": commissionValue } }
               );
             }
           }
-
           commission_earning = Math.round(commission_earning * 100) / 100;
         }
       }
 
       const staff_earning = commission_earning + tip_earning;
 
-      // Keep the old earning_start_date if exists
-      const existing = await StaffEarning.findOne({ staff_id });
-
+      // ✅ Update StaffEarning with recalculated values
       const updatedEarning = await StaffEarning.findOneAndUpdate(
-        { staff_id },
+        { staff_id, salon_id },
         {
           staff_id,
           salon_id,
@@ -114,7 +125,7 @@ router.get("/", async (req, res) => {
           commission_earning,
           tip_earning,
           staff_earning,
-          earning_start_date: existing?.earning_start_date || new Date(),
+          earning_start_date: earningStartDate,
         },
         { upsert: true, new: true }
       );
@@ -122,7 +133,7 @@ router.get("/", async (req, res) => {
       earningsList.push({
         staff_id: staff_id.toString(),
         staff_name: staff.full_name,
-        staff_image: staff_image || null,
+        staff_image: staff_image_url,
         total_booking,
         service_amount,
         commission_earning,
@@ -149,18 +160,30 @@ router.get("/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid or missing staff ID" });
     }
 
-    const staff = await Staff.findOne({ _id: staff_id, salon_id });
-    if (!staff) return res.status(404).json({ message: "Staff not found" });
+    if (!salon_id) {
+      return res.status(400).json({ message: "salon_id is required" });
+    }
 
+    const staff = await Staff.findOne({ _id: staff_id, salon_id }).lean();
+    if (!staff) {
+      return res.status(404).json({ message: "Staff not found" });
+    }
+
+    // ✅ Staff image link
+    const staff_image_url = staff.image?.data
+      ? `/api/staffs/image/${staff._id}.${staff.image.extension || "jpg"}`
+      : null;
+
+    // ✅ get earning_start_date (last reset date from payout)
+    const staffEarningDoc = await StaffEarning.findOne({ staff_id, salon_id });
+    const earningStartDate = staffEarningDoc?.earning_start_date || new Date(0);
+
+    // === fetch appointments only after earning_start_date ===
     const appointments = await Appointment.find({
       status: "check-out",
       salon_id,
-      "services": {
-        $elemMatch: {
-          staff_id: staff_id,
-          $or: [{ paid: false }, { paid: { $exists: false } }],
-        },
-      },
+      "services.staff_id": staff_id,
+      createdAt: { $gte: earningStartDate }
     });
 
     let total_booking = 0;
@@ -169,8 +192,8 @@ router.get("/:id", async (req, res) => {
 
     appointments.forEach((apt) => {
       apt.services.forEach((srv) => {
-        if (srv.staff_id.toString() === staff_id && !srv.paid) {
-          const amount = srv.service_amount || 0;
+        if (srv.staff_id.toString() === staff_id.toString()) {
+          const amount = Number(srv.service_amount || 0);
           total_booking += 1;
           service_amount += amount;
           serviceAmounts.push(amount);
@@ -178,58 +201,60 @@ router.get("/:id", async (req, res) => {
       });
     });
 
+    // === tips calculation ===
     const appointmentIds = appointments.map((apt) => apt._id);
-
     const tipsData = await Payment.aggregate([
       { $match: { appointment_id: { $in: appointmentIds } } },
       { $group: { _id: null, totalTips: { $sum: "$tips" } } },
     ]);
     const tip_earning = tipsData[0]?.totalTips || 0;
 
-    // Calculate commission based on service amounts and commission slots
+    // === commission calculation ===
     let commission_earning = 0;
     const commissionId = staff.assigned_commission_id || staff.commission_id;
     if (commissionId) {
-      const revComm = await RevenueCommission.findOne({ _id: commissionId });
-      if (revComm && revComm.commission?.length) {
-        serviceAmounts.forEach(amount => {
-          const matchingSlot = revComm.commission.find(slot => {
-            const [min, max] = slot.slot.split('-').map(Number);
+      const revComm = await RevenueCommission.findById(commissionId);
+      if (revComm && Array.isArray(revComm.commission)) {
+        serviceAmounts.forEach((amount) => {
+          const matchingSlot = revComm.commission.find((slot) => {
+            const [min, max] = slot.slot.split("-").map(Number);
             return amount >= min && amount <= max;
           });
 
           if (matchingSlot) {
-            if (revComm.commission_type === "Percentage") {
-              commission_earning += (amount * matchingSlot.amount) / 100;
-            } else {
-              commission_earning += matchingSlot.amount;
-            }
+            commission_earning +=
+              revComm.commission_type === "Percentage"
+                ? (amount * matchingSlot.amount) / 100
+                : matchingSlot.amount;
           }
         });
 
-        // Round to 2 decimal places
         commission_earning = Math.round(commission_earning * 100) / 100;
       }
     }
 
+    // === final staff earning ===
     const staff_earning = commission_earning + tip_earning;
 
     return res.status(200).json({
       staff_id,
       staff_name: staff.full_name,
+      staff_image: staff_image_url,
       total_booking,
       service_amount,
       commission_earning,
       tip_earning,
       staff_earning,
+      earning_start_date: earningStartDate,  // ✅ return reset date too
     });
   } catch (error) {
     console.error("Error calculating staff earnings:", error);
-    return res.status(500).json({ message: "Error calculating earnings", error });
+    return res
+      .status(500)
+      .json({ message: "Error calculating staff earnings", error });
   }
 });
 
-// POST /pay/:staff_id
 // POST /pay/:staff_id
 router.post("/pay/:staff_id", async (req, res) => {
   try {
@@ -322,13 +347,22 @@ router.post("/pay/:staff_id", async (req, res) => {
     await Appointment.updateMany(
       {
         status: "check-out",
-        "services.staff_id": staff_id,
+        salon_id,
+        "services.staff_id": staff._id
       },
       {
         $set: { "services.$[elem].paid": true }
       },
       {
-        arrayFilters: [{ "elem.staff_id": new mongoose.Types.ObjectId(staff_id) }]
+        arrayFilters: [
+          {
+            "elem.staff_id": staff._id,
+            $or: [
+              { "elem.paid": false },
+              { "elem.paid": { $exists: false } }
+            ]
+          }
+        ]
       }
     );
 

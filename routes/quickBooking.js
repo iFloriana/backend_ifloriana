@@ -23,8 +23,8 @@ router.get("/available-slots", async (req, res) => {
     }
 
     // 🕓 Convert shift times to slots (30-minute intervals)
-    const startShift = staff.assign_time.start_shift; 
-    const endShift = staff.assign_time.end_shift;    
+    const startShift = staff.assign_time.start_shift;
+    const endShift = staff.assign_time.end_shift;
 
     const generateSlots = (startTime, endTime, intervalMinutes = 30) => {
       const slots = [];
@@ -84,6 +84,12 @@ router.post("/", async (req, res) => {
       const customerDetails = bookingData.customer_details;
       if (!customerDetails || !customerDetails.phone_number || !customerDetails.full_name) {
         return res.status(400).json({ message: "Customer details with full_name and phone_number are required" });
+      }
+
+      // Check for unique phone number in QuickBooking
+      const existingQuickBooking = await QuickBooking.findOne({ "customer_details.phone_number": customerDetails.phone_number });
+      if (existingQuickBooking) {
+        return res.status(400).json({ message: "A quick booking with this phone number already exists." });
       }
 
       let customerQuery = {
@@ -181,7 +187,6 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 });
-
 
 // Get all quick bookings
 router.get("/", async (req, res) => {

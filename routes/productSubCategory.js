@@ -25,6 +25,19 @@ function formatBrandWithImageURL(brand) {
   };
 }
 
+function formatBranchWithImageURL(branch) {
+  if (!branch) return null;
+  const branchObj = typeof branch.toObject === "function" ? branch.toObject() : branch;
+
+  branchObj.image_url = branchObj.image?.data
+    ? `/api/branches/image/${branchObj._id}.${branchObj.image?.extension || "jpg"}`
+    : null;
+
+  delete branchObj.image;
+  return branchObj;
+}
+
+
 // ✅ Helper: format Product Category with image URL
 function formatCategoryWithImageURL(category) {
   if (!category || typeof category !== "object") return category;
@@ -141,6 +154,11 @@ router.get("/", async (req, res) => {
       return {
         ...psc,
         image_url,
+        branch_id: psc.branch_id
+          ? Array.isArray(psc.branch_id)
+            ? psc.branch_id.map(formatBranchWithImageURL)
+            : formatBranchWithImageURL(psc.branch_id)
+          : null,
         brand_id: psc.brand_id
           ? Array.isArray(psc.brand_id)
             ? psc.brand_id.map(formatBrandWithImageURL)
@@ -151,7 +169,7 @@ router.get("/", async (req, res) => {
             ? psc.product_category_id.map(formatCategoryWithImageURL)
             : formatCategoryWithImageURL(psc.product_category_id)
           : null,
-        image: undefined, // remove raw buffer
+        image: undefined,
       };
     });
 
@@ -175,18 +193,18 @@ router.get("/by-branch", async (req, res) => {
   try {
     const productSubCategories = await ProductSubCategory.find({
       salon_id: new mongoose.Types.ObjectId(salon_id),
-      branch_id: new mongoose.Types.ObjectId(branch_id)
+      branch_id: new mongoose.Types.ObjectId(branch_id),
     })
       .populate({
         path: "branch_id",
         match: { _id: new mongoose.Types.ObjectId(branch_id) },
-        select: "_id name"
+        select: "_id name image",
       })
       .populate("product_category_id")
       .populate("brand_id")
       .lean();
 
-    const filtered = productSubCategories.filter(sub => sub.branch_id);
+    const filtered = productSubCategories.filter((sub) => sub.branch_id);
 
     const data = filtered.map((psc) => {
       const image_url = psc.image?.data
@@ -196,6 +214,11 @@ router.get("/by-branch", async (req, res) => {
       return {
         ...psc,
         image_url,
+        branch_id: psc.branch_id
+          ? Array.isArray(psc.branch_id)
+            ? psc.branch_id.map(formatBranchWithImageURL)
+            : formatBranchWithImageURL(psc.branch_id)
+          : null,
         brand_id: psc.brand_id
           ? Array.isArray(psc.brand_id)
             ? psc.brand_id.map(formatBrandWithImageURL)
@@ -241,6 +264,12 @@ router.get("/:id", async (req, res) => {
     const obj = productSubCategory.toObject();
     obj.image_url = productSubCategory.image?.data
       ? `/api/productSubCategories/image/${productSubCategory._id}.${productSubCategory.image.extension || "jpg"}`
+      : null;
+
+    obj.branch_id = obj.branch_id
+      ? Array.isArray(obj.branch_id)
+        ? obj.branch_id.map(formatBranchWithImageURL)
+        : formatBranchWithImageURL(obj.branch_id)
       : null;
 
     obj.brand_id = obj.brand_id

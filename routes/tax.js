@@ -3,7 +3,7 @@ const express = require("express");
 const Tax = require("../models/Tax");
 const Branch = require("../models/Branch");
 const Salon = require("../models/Salon");
-const router = express.Router(); 
+const router = express.Router();
 const mongoose = require("mongoose");
 
 // Middleware to validate salon_id
@@ -52,22 +52,51 @@ router.post("/", async (req, res) => {
     }
 });
 
-// Get All Taxes
+// ✅ Helper to format branch with image_url
+function formatBranchWithImageURL(branch) {
+  if (!branch) return null;
+
+  const branchObj = { ...branch }; // clone so we can mutate safely
+
+  branchObj.image_url = branchObj.image?.data
+    ? `/api/branches/image/${branchObj._id}.${branchObj.image?.extension || "jpg"}`
+    : null;
+
+  delete branchObj.image; // remove raw buffer completely
+  return branchObj;
+}
+
+// ----------------------
+// GET: All Taxes
+// ----------------------
 router.get("/", async (req, res) => {
-    const { salon_id } = req.query;
+  const { salon_id } = req.query;
 
-    try {
-        // Find taxes where at least one branch_id matches a branch belonging to the salon_id
-        const taxes = await Tax.find({ salon_id: salon_id }).populate("branch_id");
+  try {
+    const taxes = await Tax.find({ salon_id })
+      .populate({
+        path: "branch_id",
+        select: "_id name image" // ✅ only include what we need
+      })
+      .lean();
 
-        res.status(200).json({ message: "Taxes fetched successfully", data: taxes });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Server error" });
-    }
+    const data = taxes.map((tax) => ({
+      ...tax,
+      branch_id: Array.isArray(tax.branch_id)
+        ? tax.branch_id.map(formatBranchWithImageURL)
+        : formatBranchWithImageURL(tax.branch_id),
+    }));
+
+    res.status(200).json({ message: "Taxes fetched successfully", data });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
-// get all taxes filetred by branch_id
+// ----------------------
+// GET: Taxes by Branch
+// ----------------------
 router.get("/by-branch", async (req, res) => {
   const { salon_id, branch_id } = req.query;
 
@@ -78,40 +107,59 @@ router.get("/by-branch", async (req, res) => {
   try {
     const taxes = await Tax.find({
       salon_id: new mongoose.Types.ObjectId(salon_id),
-      branch_id: new mongoose.Types.ObjectId(branch_id) // filter array contains
-    }).populate({
-      path: "branch_id",
-      match: { _id: new mongoose.Types.ObjectId(branch_id) }, // only populate the matching branch
-      select: "_id name"
-    });
+      branch_id: new mongoose.Types.ObjectId(branch_id),
+    })
+      .populate({
+        path: "branch_id",
+        match: { _id: new mongoose.Types.ObjectId(branch_id) },
+        select: "_id name image",
+      })
+      .lean();
 
-    // 🧼 Optional: Remove empty `branch_id` arrays if no match was populated
-    const filteredTaxes = taxes.filter(tax => tax.branch_id.length > 0);
+    const filtered = taxes.filter((tax) => tax.branch_id?.length > 0);
 
-    res.status(200).json({ message: "Taxes fetched successfully", data: filteredTaxes });
+    const data = filtered.map((tax) => ({
+      ...tax,
+      branch_id: Array.isArray(tax.branch_id)
+        ? tax.branch_id.map(formatBranchWithImageURL)
+        : formatBranchWithImageURL(tax.branch_id),
+    }));
+
+    res.status(200).json({ message: "Taxes fetched successfully", data });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// Get Single Tax
+// ----------------------
+// GET: Single Tax
+// ----------------------
 router.get("/:id", async (req, res) => {
-    const { id } = req.params;
-    const { salon_id } = req.query; 
+  const { id } = req.params;
+  const { salon_id } = req.query;
 
-    try {
-        const tax = await Tax.findOne({ _id: id, salon_id: salon_id }).populate("branch_id");
+  try {
+    const tax = await Tax.findOne({ _id: id, salon_id })
+      .populate({
+        path: "branch_id",
+        select: "_id name image",
+      })
+      .lean();
 
-        if (!tax) {
-            return res.status(404).json({ message: "Tax not found or does not belong to the specified salon" });
-        }
-
-        res.status(200).json({ message: "Tax fetched successfully", data: tax });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Server error" });
+    if (!tax) {
+      return res.status(404).json({ message: "Tax not found or does not belong to the specified salon" });
     }
+
+    tax.branch_id = Array.isArray(tax.branch_id)
+      ? tax.branch_id.map(formatBranchWithImageURL)
+      : formatBranchWithImageURL(tax.branch_id);
+
+    res.status(200).json({ message: "Tax fetched successfully", data: tax });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 // Update Tax

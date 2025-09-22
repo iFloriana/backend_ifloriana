@@ -17,11 +17,11 @@ router.post("/", upload.single("image"), async (req, res) => {
   try {
     const image = req.file
       ? {
-          data: req.file.buffer,
-          contentType: req.file.mimetype,
-          originalName: req.file.originalname,
-          extension: path.extname(req.file.originalname).slice(1)
-        }
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1)
+      }
       : undefined;
 
     const newCategory = new Category({
@@ -55,10 +55,24 @@ router.get("/", async (req, res) => {
 
     const data = categories.map((category) => {
       const obj = category.toObject();
-      obj.image_url = category.image?.data
-        ? `/api/categories/image/${category._id}.${category.image.extension || "jpg"}`
+
+      // ✅ Category image
+      obj.image_url = obj.image?.data
+        ? `/api/categories/image/${obj._id}.${obj.image.extension || "jpg"}`
         : null;
       delete obj.image;
+
+      // ✅ Salon image (nested)
+      if (obj.salon_id) {
+        obj.salon_id = {
+          ...obj.salon_id,
+          image_url: obj.salon_id.image?.data
+            ? `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`
+            : null,
+        };
+        delete obj.salon_id.image;
+      }
+
       return obj;
     });
 
@@ -97,10 +111,23 @@ router.get("/:id", async (req, res) => {
     }
 
     const obj = category.toObject();
-    obj.image_url = category.image?.data
-      ? `/api/categories/image/${category._id}.${category.image.extension || "jpg"}`
+
+    // ✅ Category image
+    obj.image_url = obj.image?.data
+      ? `/api/categories/image/${obj._id}.${obj.image.extension || "jpg"}`
       : null;
     delete obj.image;
+
+    // ✅ Salon image (nested)
+    if (obj.salon_id) {
+      obj.salon_id = {
+        ...obj.salon_id,
+        image_url: obj.salon_id.image?.data
+          ? `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`
+          : null,
+      };
+      delete obj.salon_id.image;
+    }
 
     res.status(200).json({
       message: "Category fetched successfully",

@@ -4,7 +4,7 @@ const AdminSchema = new mongoose.Schema({
     full_name: String,
     phone_number: {
         type: String,
-        unique: true 
+        unique: true
     },
     email: {
         type: String,
@@ -14,10 +14,12 @@ const AdminSchema = new mongoose.Schema({
         type: String,
         unique: true
     },
-    package_id: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'SuperAdminPackage' 
-    },
+    package_id: [{
+        package_id: { type: mongoose.Schema.Types.ObjectId, ref: "SuperAdminPackage" },
+        package_start_date: Date,
+        package_expiration_date: Date,
+        status: { type: Number, default: 1 }
+    }],
     package_start_date: Date,
     package_expiration_date: Date,
     password: String,

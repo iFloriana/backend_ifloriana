@@ -1,5 +1,5 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Manager = require("../models/Manager");
 const getUploader = require("../middleware/imageUpload"); // ✅ Use the image upload middleware
@@ -188,14 +188,26 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    const managers = await Manager.find({ salon_id }).populate("branch_id");
+    const managers = await Manager.find({ salon_id })
+      .populate("branch_id"); // We will transform image below
 
     const data = managers.map((manager) => {
       const obj = manager.toObject();
+
+      // Manager image URL
       obj.image_url = manager.image?.data
         ? `/api/managers/image/${manager._id}.${manager.image.extension || "jpg"}`
         : null;
       delete obj.image;
+
+      // Branch image URL (if populated and has image)
+      if (obj.branch_id && obj.branch_id.image?.data) {
+        obj.branch_id.image_url = `/api/branches/image/${obj.branch_id._id}.${obj.branch_id.image.extension || "jpg"}`;
+        delete obj.branch_id.image; // Remove binary
+      } else if (obj.branch_id) {
+        obj.branch_id.image_url = null;
+      }
+
       return obj;
     });
 
@@ -216,17 +228,28 @@ router.get("/:id", async (req, res) => {
   }
 
   try {
-    const manager = await Manager.findOne({ _id: id, salon_id }).populate("branch_id");
+    const manager = await Manager.findOne({ _id: id, salon_id })
+      .populate("branch_id");
 
     if (!manager) {
       return res.status(404).json({ message: "Manager not found" });
     }
 
     const obj = manager.toObject();
+
+    // Manager image URL
     obj.image_url = manager.image?.data
       ? `/api/managers/image/${manager._id}.${manager.image.extension || "jpg"}`
       : null;
     delete obj.image;
+
+    // Branch image URL
+    if (obj.branch_id && obj.branch_id.image?.data) {
+      obj.branch_id.image_url = `/api/branches/image/${obj.branch_id._id}.${obj.branch_id.image.extension || "jpg"}`;
+      delete obj.branch_id.image;
+    } else if (obj.branch_id) {
+      obj.branch_id.image_url = null;
+    }
 
     res.status(200).json({ message: "Manager fetched successfully", data: obj });
   } catch (error) {

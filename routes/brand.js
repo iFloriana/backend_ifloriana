@@ -42,6 +42,21 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
+// ✅ helper to format images
+function formatImage(doc, type) {
+  if (!doc) return doc;
+  const obj = doc.toObject ? doc.toObject() : { ...doc };
+
+  if (obj.image?.data) {
+    obj.image_url = `/api/${type}/image/${obj._id}.${obj.image.extension || "jpg"}`;
+  } else {
+    obj.image_url = null;
+  }
+
+  delete obj.image;
+  return obj;
+}
+
 // ✅ Get All Brands by salon_id
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
@@ -54,47 +69,23 @@ router.get("/", async (req, res) => {
     const brands = await Brand.find({ salon_id }).populate("branch_id");
 
     const data = brands.map((brand) => {
-      const obj = brand.toObject();
-      obj.image_url = brand.image?.data
-        ? `/api/brands/image/${brand._id}.${brand.image.extension || "jpg"}`
-        : null;
-      delete obj.image;
+      let obj = formatImage(brand, "brands");
+
+      // ✅ fix branch images too
+      if (obj.branch_id) {
+        if (Array.isArray(obj.branch_id)) {
+          obj.branch_id = obj.branch_id.map((b) => formatImage(b, "branches"));
+        } else {
+          obj.branch_id = formatImage(obj.branch_id, "branches");
+        }
+      }
+
       return obj;
     });
 
     res.status(200).json({ message: "Brands fetched successfully", data });
   } catch (error) {
     console.error("Get all brands error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// ✅ Get Brands by Branch ID
-router.get("/by-branch", async (req, res) => {
-  const { salon_id, branch_id } = req.query;
-
-  if (!salon_id || !branch_id) {
-    return res.status(400).json({ message: "salon_id and branch_id are required" });
-  }
-
-  try {
-    const brands = await Brand.find({
-      salon_id: new mongoose.Types.ObjectId(salon_id),
-      branch_id: new mongoose.Types.ObjectId(branch_id)
-    }).populate("branch_id", "_id name");
-
-    const formattedBrands = brands.map((brand) => {
-      const obj = brand.toObject();
-      obj.image_url = brand.image?.data
-        ? `/api/brands/image/${brand._id}.${brand.image.extension || "jpg"}`
-        : null;
-      delete obj.image;
-      return obj;
-    });
-
-    res.status(200).json({ message: "Brands fetched successfully", data: formattedBrands });
-  } catch (error) {
-    console.error("Error fetching brands:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -112,6 +103,74 @@ router.get("/names", async (req, res) => {
     res.status(200).json({ data: brands });
   } catch (error) {
     console.error("Get brand names error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ Get Brands by Branch ID
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    const brands = await Brand.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id),
+    }).populate("branch_id");
+
+    const formattedBrands = brands.map((brand) => {
+      let obj = formatImage(brand, "brands");
+
+      if (obj.branch_id) {
+        if (Array.isArray(obj.branch_id)) {
+          obj.branch_id = obj.branch_id.map((b) => formatImage(b, "branches"));
+        } else {
+          obj.branch_id = formatImage(obj.branch_id, "branches");
+        }
+      }
+
+      return obj;
+    });
+
+    res.status(200).json({ message: "Brands fetched successfully", data: formattedBrands });
+  } catch (error) {
+    console.error("Error fetching brands:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ✅ Get Single Brand by ID
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+  const { salon_id } = req.query;
+
+  if (!salon_id) {
+    return res.status(400).json({ message: "salon_id is required" });
+  }
+
+  try {
+    const brand = await Brand.findOne({ _id: id, salon_id }).populate("branch_id");
+
+    if (!brand) {
+      return res.status(404).json({ message: "Brand not found" });
+    }
+
+    let obj = formatImage(brand, "brands");
+
+    if (obj.branch_id) {
+      if (Array.isArray(obj.branch_id)) {
+        obj.branch_id = obj.branch_id.map((b) => formatImage(b, "branches"));
+      } else {
+        obj.branch_id = formatImage(obj.branch_id, "branches");
+      }
+    }
+
+    res.status(200).json({ message: "Brand fetched successfully", data: obj });
+  } catch (error) {
+    console.error("Get single brand error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -137,35 +196,6 @@ router.get("/image/:filename", async (req, res) => {
   } catch (err) {
     console.error("Image fetch error:", err);
     res.status(500).json({ message: "Server error" });
-  }
-});
-
-// ✅ Get Single Brand by ID
-router.get("/:id", async (req, res) => {
-  const { id } = req.params;
-  const { salon_id } = req.query;
-
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
-  }
-
-  try {
-    const brand = await Brand.findOne({ _id: id, salon_id }).populate("branch_id");
-
-    if (!brand) {
-      return res.status(404).json({ message: "Brand not found" });
-    }
-
-    const obj = brand.toObject();
-    obj.image_url = brand.image?.data
-      ? `/api/brands/image/${brand._id}.${brand.image.extension || "jpg"}`
-      : null;
-    delete obj.image;
-
-    res.status(200).json({ message: "Brand fetched successfully", data: obj });
-  } catch (error) {
-    console.error("Get single brand error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 

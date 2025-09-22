@@ -10,32 +10,58 @@ const path = require("path");
 
 // ✅ Helper: transforms a product category document to remove base64 images
 function transformProductCategory(category) {
-  category.image_url = category.image?.data
-    ? `/api/productCategories/image/${category._id}.${category.image?.extension || "jpg"}`
-    : null;
-  delete category.image;
+  if (!category) return null;
+  const obj = { ...category };
 
-  if (Array.isArray(category.brand_id)) {
-    category.brand_id = category.brand_id.map((brand) => {
+  // ✅ Fix product category image
+  if (obj.image?.data) {
+    obj.image_url = `/api/productCategories/image/${obj._id}.${obj.image.extension || "jpg"}`;
+  } else {
+    obj.image_url = null;
+  }
+  delete obj.image;
+
+  // ✅ Fix brand images
+  if (Array.isArray(obj.brand_id)) {
+    obj.brand_id = obj.brand_id.map((brand) => {
       if (!brand) return brand;
-
       const brandObj = { ...brand };
       brandObj.image_url = brand.image?.data
-        ? `/api/brands/image/${brand._id}.${brand.image?.extension || "jpg"}`
+        ? `/api/brands/image/${brand._id}.${brand.image.extension || "jpg"}`
         : null;
       delete brandObj.image;
-
       return brandObj;
     });
-  } else if (category.brand_id) {
-    // In case it's a single object
-    category.brand_id.image_url = category.brand_id.image?.data
-      ? `/api/brands/image/${category.brand_id._id}.${category.brand_id.image?.extension || "jpg"}`
+  } else if (obj.brand_id) {
+    const brandObj = { ...obj.brand_id };
+    brandObj.image_url = brandObj.image?.data
+      ? `/api/brands/image/${brandObj._id}.${brandObj.image.extension || "jpg"}`
       : null;
-    delete category.brand_id.image;
+    delete brandObj.image;
+    obj.brand_id = brandObj;
   }
 
-  return category;
+  // ✅ Fix branch images
+  if (Array.isArray(obj.branch_id)) {
+    obj.branch_id = obj.branch_id.map((branch) => {
+      if (!branch) return branch;
+      const branchObj = { ...branch };
+      branchObj.image_url = branch.image?.data
+        ? `/api/branches/image/${branch._id}.${branch.image.extension || "jpg"}`
+        : null;
+      delete branchObj.image;
+      return branchObj;
+    });
+  } else if (obj.branch_id) {
+    const branchObj = { ...obj.branch_id };
+    branchObj.image_url = branchObj.image?.data
+      ? `/api/branches/image/${branchObj._id}.${branchObj.image.extension || "jpg"}`
+      : null;
+    delete branchObj.image;
+    obj.branch_id = branchObj;
+  }
+
+  return obj;
 }
 
 router.get("/image/:filename", async (req, res) => {
@@ -128,7 +154,7 @@ router.get("/", async (req, res) => {
     const productCategories = await ProductCategory.find({ salon_id })
       .populate("branch_id")
       .populate("brand_id")
-      .lean(); // ✅ important
+      .lean();
 
     const data = productCategories.map(transformProductCategory);
 
@@ -154,10 +180,10 @@ router.get("/by-branch", async (req, res) => {
       .populate({
         path: "branch_id",
         match: { _id: new mongoose.Types.ObjectId(branch_id) },
-        select: "_id name"
+        select: "_id name image"
       })
       .populate("brand_id")
-      .lean(); // ✅ important
+      .lean();
 
     const filtered = productCategories.filter(cat => cat.branch_id);
     const data = filtered.map(transformProductCategory);
@@ -179,7 +205,7 @@ router.get("/:id", async (req, res) => {
     const productCategory = await ProductCategory.findOne({ _id: id, salon_id })
       .populate("branch_id")
       .populate("brand_id")
-      .lean(); // ✅ important
+      .lean();
 
     if (!productCategory) {
       return res.status(404).json({ message: "ProductCategory not found" });

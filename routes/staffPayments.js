@@ -26,51 +26,71 @@ router.get("/", async (req, res) => {
         path: "staff_id",
         select: "full_name email phone_number image",
       })
-      .select("paid_at staff_id total_paid payment_method tips commission_amount");
+      .select("paid_at staff_id total_paid payment_method tips commission_amount")
+      .lean(); // ✅ This ensures delete works
 
     const staffEarnings = await StaffEarning.find({ salon_id }).lean();
     const earningsMap = {};
     for (const earning of staffEarnings) {
-      const key = (earning.staff_id && earning.staff_id.toString()) || (earning._id && earning._id.toString());
+      const key =
+        (earning.staff_id && earning.staff_id.toString()) ||
+        (earning._id && earning._id.toString());
       if (key) earningsMap[key] = earning;
     }
 
     const formattedPayments = payments
-      .filter(payment => payment.staff_id)
+      .filter((payment) => payment.staff_id)
       .map((payment) => {
-        const staffIdStr = payment.staff_id._id ? payment.staff_id._id.toString() : null;
+        const staff = payment.staff_id;
         return {
           payment_date: payment.paid_at,
           staff: {
-            name: payment.staff_id.full_name || "N/A",
-            email: payment.staff_id.email || "N/A",
-            phone: payment.staff_id.phone_number || "N/A",
-            image: payment.staff_id.image || null,
+            name: staff.full_name || "N/A",
+            email: staff.email || "N/A",
+            phone: staff.phone_number || "N/A",
+            image_url: staff.image?.data
+              ? `/api/staffs/image/${staff._id}.${staff.image.extension || "jpg"}`
+              : null, // ✅ No buffer, just /api URL
           },
           commission_amount: payment.commission_amount || 0,
           tips: payment.tips || 0,
           payment_type: payment.payment_method,
           total_pay: payment.total_paid,
-          staff_id: staffIdStr,
+          staff_id: staff._id ? staff._id.toString() : null,
         };
       });
 
-    const staffWithPayments = formattedPayments.filter((payment) => payment.total_pay > 0);
+    const staffWithPayments = formattedPayments.filter(
+      (payment) => payment.total_pay > 0
+    );
 
     res.status(200).json({ success: true, data: staffWithPayments });
 
-    // Remove paid staff from StaffEarning collection AFTER sending response
+    // Remove paid staff from StaffEarning AFTER sending response
     setImmediate(async () => {
       for (const payment of staffWithPayments) {
         try {
-          await StaffEarning.deleteOne({ staff_id: new mongoose.Types.ObjectId(payment.staff_id), salon_id });
+          await StaffEarning.deleteOne({
+            staff_id: new mongoose.Types.ObjectId(payment.staff_id),
+            salon_id,
+          });
         } catch (err) {
-          console.error('Error deleting StaffEarning for staff_id', payment.staff_id, err);
+          console.error(
+            "Error deleting StaffEarning for staff_id",
+            payment.staff_id,
+            err
+          );
         }
       }
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch payments", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to fetch payments",
+        error: error.message,
+      });
   }
 });
 

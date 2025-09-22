@@ -5,6 +5,33 @@ const Salon = require("../models/Salon");
 const router = express.Router();
 const mongoose = require("mongoose");
 
+// ✅ Safe transform for branch
+function transformBranch(branch) {
+  if (!branch) return null;
+
+  const branchObj = typeof branch.toObject === "function" ? branch.toObject() : branch;
+
+  branchObj.image_url = branchObj.image?.data
+    ? `/api/branches/image/${branchObj._id}.${branchObj.image?.extension || "jpg"}`
+    : null;
+
+  delete branchObj.image; // remove raw buffer
+  return branchObj;
+}
+
+// ✅ Safe transform for tag (handles single + array branch_id)
+function transformTag(tag) {
+  const tagObj = typeof tag.toObject === "function" ? tag.toObject() : tag;
+
+  if (Array.isArray(tagObj.branch_id)) {
+    tagObj.branch_id = tagObj.branch_id.map(b => transformBranch(b));
+  } else if (tagObj.branch_id) {
+    tagObj.branch_id = transformBranch(tagObj.branch_id);
+  }
+
+  return tagObj;
+}
+
 // Middleware to validate salon_id
 const validateSalonId = async (req, res, next) => {
   let salonId;
@@ -51,10 +78,10 @@ router.post("/", async (req, res) => {
 
     // 3. Create the new tag, including salon_id from the request body
     const newTag = new Tag({
-      branch_id, 
+      branch_id,
       name,
       status,
-      salon_id, 
+      salon_id,
     });
     await newTag.save();
 
@@ -70,37 +97,14 @@ router.get("/", async (req, res) => {
   const salon_id = req.salonId;
 
   try {
-    const tags = await Tag.find({ salon_id }).populate("branch_id");
+    let tags = await Tag.find({ salon_id }).populate("branch_id");
+
+    tags = tags.map(transformTag);
 
     res.status(200).json({ message: "Tags fetched successfully", data: tags });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
-  }
-});
-
-router.get("/by-branch", async (req, res) => {
-  const { salon_id, branch_id } = req.query;
-  if (!salon_id || !branch_id) {
-    return res.status(400).json({ message: "salon_id and branch_id are required" });
-  }
-
-  try {
-    const tags = await Tag.find({
-      salon_id: new mongoose.Types.ObjectId(salon_id),
-      branch_id: new mongoose.Types.ObjectId(branch_id)
-    }).populate({
-      path: "branch_id",
-      match: { _id: new mongoose.Types.ObjectId(branch_id) },
-      select: "_id name"
-    });
-
-    const filteredTags = tags.filter(tag => tag.branch_id && tag.branch_id.length > 0);
-
-    res.status(200).json({ message: "Tags fetched successfully", data: filteredTags });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Internal server error" });
   }
 });
 
@@ -119,19 +123,47 @@ router.get("/names", async (req, res) => {
   }
 });
 
+// Get Tags by Branch
+router.get("/by-branch", async (req, res) => {
+  const { salon_id, branch_id } = req.query;
+  if (!salon_id || !branch_id) {
+    return res.status(400).json({ message: "salon_id and branch_id are required" });
+  }
+
+  try {
+    let tags = await Tag.find({
+      salon_id: new mongoose.Types.ObjectId(salon_id),
+      branch_id: new mongoose.Types.ObjectId(branch_id)
+    }).populate({
+      path: "branch_id",
+      match: { _id: new mongoose.Types.ObjectId(branch_id) },
+      select: "_id name image" // include image for transformation
+    });
+
+    tags = tags.map(transformTag);
+
+    res.status(200).json({ message: "Tags fetched successfully", data: tags });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Get Single Tag
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
-  const salon_id = req.salonId; // Get salon_id from the validated middleware
+  const salon_id = req.salonId;
 
   try {
-    const tag = await Tag.findOne({ _id: id, salon_id }).populate("branch_id");
+    let tag = await Tag.findOne({ _id: id, salon_id }).populate("branch_id");
 
     if (!tag) {
       return res.status(404).json({ message: "Tag not found or does not belong to the specified salon" });
     }
 
-    res.status(200).json({ message: "Tag fetched successfully", data: tag });
+    const tagObj = transformTag(tag);
+
+    res.status(200).json({ message: "Tag fetched successfully", data: tagObj });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });

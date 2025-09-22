@@ -67,9 +67,26 @@ router.post('/', async (req, res) => {
 // Get all staff payouts
 router.get('/', async (req, res) => {
     try {
-        const payouts = await StaffPayout.find().populate('staff_id', 'name');
-        res.status(200).json({ message: 'Staff payouts fetched successfully', data: payouts });
+        const payouts = await StaffPayout.find()
+            .populate('staff_id', 'name image') // fetch image too
+            .lean();
+
+        const processed = payouts.map(payout => {
+            if (payout.staff_id) {
+                payout.staff_id.image_url = payout.staff_id.image?.data
+                    ? `/api/staffs/image/${payout.staff_id._id}.${payout.staff_id.image.extension || 'jpg'}`
+                    : null;
+                delete payout.staff_id.image; // remove buffer
+            }
+            return payout;
+        });
+
+        res.status(200).json({
+            message: 'Staff payouts fetched successfully',
+            data: processed
+        });
     } catch (error) {
+        console.error(error);
         res.status(500).json({ message: 'Error fetching staff payouts', error });
     }
 });
@@ -77,10 +94,27 @@ router.get('/', async (req, res) => {
 // Get a single staff payout
 router.get('/:id', async (req, res) => {
     try {
-        const payout = await StaffPayout.findById(req.params.id).populate('staff_id', 'name');
-        if (!payout) return res.status(404).json({ message: 'Staff payout not found' });
-        res.status(200).json({ message: 'Staff payout fetched successfully', data: payout });
+        const payout = await StaffPayout.findById(req.params.id)
+            .populate('staff_id', 'name image')
+            .lean();
+
+        if (!payout) {
+            return res.status(404).json({ message: 'Staff payout not found' });
+        }
+
+        if (payout.staff_id) {
+            payout.staff_id.image_url = payout.staff_id.image?.data
+                ? `/api/staffs/image/${payout.staff_id._id}.${payout.staff_id.image.extension || 'jpg'}`
+                : null;
+            delete payout.staff_id.image;
+        }
+
+        res.status(200).json({
+            message: 'Staff payout fetched successfully',
+            data: payout
+        });
     } catch (error) {
+        console.error(error);
         res.status(500).json({ message: 'Error fetching staff payout', error });
     }
 });

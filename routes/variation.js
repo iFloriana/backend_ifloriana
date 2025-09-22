@@ -4,6 +4,32 @@ const Salon = require("../models/Salon"); // Assuming you have a Salon model
 const Branch = require("../models/Branch"); // Assuming you have a Branch model
 const router = express.Router();
 
+function transformBranch(branch) {
+  if (!branch) return null;
+
+  const branchObj = typeof branch.toObject === "function" ? branch.toObject() : branch;
+
+  branchObj.image_url = branchObj.image?.data
+    ? `/api/branches/image/${branchObj._id}.${branchObj.image?.extension || "jpg"}`
+    : null;
+
+  delete branchObj.image; // remove raw buffer
+  return branchObj;
+}
+
+// ✅ Safe transform for variation
+function transformVariation(variation) {
+  const variationObj = typeof variation.toObject === "function" ? variation.toObject() : variation;
+
+  if (Array.isArray(variationObj.branch_id)) {
+    variationObj.branch_id = variationObj.branch_id.map(b => transformBranch(b));
+  } else if (variationObj.branch_id) {
+    variationObj.branch_id = transformBranch(variationObj.branch_id);
+  }
+
+  return variationObj;
+}
+
 // Create Variation
 router.post("/", async (req, res) => {
   const { branch_id, name, type, value, status, salon_id } = req.body;
@@ -46,14 +72,19 @@ router.get("/", async (req, res) => {
       return res.status(404).json({ message: "Salon not found" });
     }
 
-    const variations = await Variation.find().populate({
+    let variations = await Variation.find().populate({
       path: "branch_id",
       match: { salon_id },
+      select: "_id name image", // include image for transformation
     });
 
-    const filteredVariations = variations.filter((variation) => variation.branch_id !== null);
+    // filter out variations with no branch match
+    variations = variations.filter(v => v.branch_id !== null);
 
-    res.status(200).json({ message: "Variations fetched successfully", data: filteredVariations });
+    // transform branch image
+    variations = variations.map(transformVariation);
+
+    res.status(200).json({ message: "Variations fetched successfully", data: variations });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -95,14 +126,19 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Salon not found" });
     }
 
-    const variation = await Variation.findOne({ _id: id }).populate({
+    let variation = await Variation.findOne({ _id: id }).populate({
       path: "branch_id",
       match: { salon_id },
+      select: "_id name image",
     });
 
     if (!variation || !variation.branch_id) {
-      return res.status(404).json({ message: "Variation not found or does not belong to the specified salon" });
+      return res.status(404).json({
+        message: "Variation not found or does not belong to the specified salon",
+      });
     }
+
+    variation = transformVariation(variation);
 
     res.status(200).json({ message: "Variation fetched successfully", data: variation });
   } catch (error) {

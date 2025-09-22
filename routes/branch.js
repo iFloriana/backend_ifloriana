@@ -37,7 +37,6 @@ function transformProduct(product, req) {
   return obj;
 }
 
-
 // ------------------- POST: Create Branch -------------------
 router.post("/", upload.single("image"), async (req, res) => {
   const { salon_id } = req.body;
@@ -71,31 +70,22 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
-// ------------------- PUT: Update Branch -------------------
-router.put("/:id", upload.single("image"), async (req, res) => {
+// ------------------- GET: Branch Names -------------------
+router.get("/names", async (req, res) => {
+  const { salon_id } = req.query;
+
+  if (!salon_id) {
+    return res.status(400).json({ message: "salon_id is required" });
+  }
+
   try {
-    const updateData = { ...req.body };
-
-    if (req.file) {
-      updateData.image = {
-        data: req.file.buffer,
-        contentType: req.file.mimetype,
-        originalName: req.file.originalname,
-        extension: path.extname(req.file.originalname).slice(1),
-      };
-    }
-
-    const updatedBranch = await Branch.findByIdAndUpdate(req.params.id, updateData, {
-      new: true,
+    const branchNames = await Branch.find({ salon_id }, { name: 1 });
+    res.status(200).json({
+      message: "Branch names and IDs fetched successfully",
+      data: branchNames,
     });
-
-    if (!updatedBranch) {
-      return res.status(404).json({ message: "Branch not found" });
-    }
-
-    res.json({ message: "Branch updated", data: updatedBranch });
   } catch (error) {
-    console.error("Update branch error:", error);
+    console.error("Fetch branch names error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -137,16 +127,23 @@ router.get("/", async (req, res) => {
       const obj = branch.toObject();
       obj.staff_count = countMap[branch._id.toString()] || 0;
 
-      // Branch image
+      // ✅ Keep branch image
       if (branch.image?.data) {
         obj.image_url = `/api/branches/image/${branch._id}.${branch.image.extension || "jpg"}`;
       }
       delete obj.image;
 
-      // ✅ Salon image
-      if (obj.salon_id && obj.salon_id.image?.data) {
-        obj.salon_id.image_url = `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`;
+      // ❌ Remove salon image
+      if (obj.salon_id && obj.salon_id.image) {
         delete obj.salon_id.image;
+      }
+
+      // ❌ Remove service images
+      if (Array.isArray(obj.service_id)) {
+        obj.service_id = obj.service_id.map((service) => {
+          if (service?.image) delete service.image;
+          return service;
+        });
       }
 
       return obj;
@@ -158,26 +155,6 @@ router.get("/", async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch branches error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// ------------------- GET: Branch Names -------------------
-router.get("/names", async (req, res) => {
-  const { salon_id } = req.query;
-
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
-  }
-
-  try {
-    const branchNames = await Branch.find({ salon_id }, { name: 1 });
-    res.status(200).json({
-      message: "Branch names and IDs fetched successfully",
-      data: branchNames,
-    });
-  } catch (error) {
-    console.error("Fetch branch names error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
@@ -199,16 +176,23 @@ router.get("/:id", async (req, res) => {
 
     const obj = branch.toObject();
 
-    // Branch image
+    // ✅ Keep branch image
     if (branch.image?.data) {
       obj.image_url = `/api/branches/image/${branch._id}.${branch.image.extension || "jpg"}`;
     }
     delete obj.image;
 
-    // ✅ Salon image
-    if (obj.salon_id && obj.salon_id.image?.data) {
-      obj.salon_id.image_url = `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`;
+    // ❌ Remove salon image
+    if (obj.salon_id && obj.salon_id.image) {
       delete obj.salon_id.image;
+    }
+
+    // ❌ Remove service images
+    if (Array.isArray(obj.service_id)) {
+      obj.service_id = obj.service_id.map((service) => {
+        if (service?.image) delete service.image;
+        return service;
+      });
     }
 
     res.status(200).json({
@@ -220,6 +204,35 @@ router.get("/:id", async (req, res) => {
     });
   } catch (error) {
     console.error("Fetch branch error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+// ------------------- PUT: Update Branch -------------------
+router.put("/:id", upload.single("image"), async (req, res) => {
+  try {
+    const updateData = { ...req.body };
+
+    if (req.file) {
+      updateData.image = {
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      };
+    }
+
+    const updatedBranch = await Branch.findByIdAndUpdate(req.params.id, updateData, {
+      new: true,
+    });
+
+    if (!updatedBranch) {
+      return res.status(404).json({ message: "Branch not found" });
+    }
+
+    res.json({ message: "Branch updated", data: updatedBranch });
+  } catch (error) {
+    console.error("Update branch error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });

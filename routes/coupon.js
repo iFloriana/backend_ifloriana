@@ -66,6 +66,42 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
+// ✅ Helper to transform branch (with image_url)
+function transformBranch(branch) {
+  if (!branch) return branch;
+  const b = branch.toObject ? branch.toObject() : branch;
+
+  b.image_url = b.image?.data
+    ? `/api/branches/image/${b._id}.${b.image.extension || "jpg"}`
+    : null;
+
+  delete b.image;
+  return b;
+}
+
+// ✅ Helper to transform coupon (with coupon + branch image_url)
+function transformCoupon(coupon) {
+  const obj = coupon.toObject();
+
+  // Coupon image
+  obj.image_url = coupon.image?.data
+    ? `/api/coupons/image/${coupon._id}.${coupon.image.extension || "jpg"}`
+    : null;
+  delete obj.image;
+
+  // Branch images (handle both single and array cases)
+  if (obj.branch_id) {
+    if (Array.isArray(obj.branch_id)) {
+      obj.branch_id = obj.branch_id.map(transformBranch);
+    } else {
+      obj.branch_id = transformBranch(obj.branch_id);
+    }
+  }
+
+  return obj;
+}
+
+
 // ------------------- Get All Coupons -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
@@ -77,14 +113,7 @@ router.get("/", async (req, res) => {
   try {
     const coupons = await Coupon.find({ salon_id }).populate("branch_id");
 
-    const data = coupons.map((coupon) => {
-      const obj = coupon.toObject();
-      obj.image_url = coupon.image?.data
-        ? `/api/coupons/image/${coupon._id}.${coupon.image.extension || "jpg"}`
-        : null;
-      delete obj.image;
-      return obj;
-    });
+    const data = coupons.map(transformCoupon);
 
     res.status(200).json({ message: "Coupons fetched successfully", data });
   } catch (error) {
@@ -108,17 +137,9 @@ router.get("/by-branch", async (req, res) => {
     }).populate({
       path: "branch_id",
       match: { _id: new mongoose.Types.ObjectId(branch_id) },
-      select: "_id name",
     });
 
-    const data = coupons.map((coupon) => {
-      const obj = coupon.toObject();
-      obj.image_url = coupon.image?.data
-        ? `/api/coupons/image/${coupon._id}.${coupon.image.extension || "jpg"}`
-        : null;
-      delete obj.image;
-      return obj;
-    });
+    const data = coupons.map(transformCoupon);
 
     res.status(200).json({ message: "Coupons fetched successfully", data });
   } catch (error) {
@@ -142,11 +163,7 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Coupon not found" });
     }
 
-    const obj = coupon.toObject();
-    obj.image_url = coupon.image?.data
-      ? `/api/coupons/image/${coupon._id}.${coupon.image.extension || "jpg"}`
-      : null;
-    delete obj.image;
+    const obj = transformCoupon(coupon);
 
     res.status(200).json({ message: "Coupon fetched successfully", data: obj });
   } catch (error) {

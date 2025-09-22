@@ -45,13 +45,17 @@ const customerMembershipRoutes = require("./routes/customerMembership");
 const revenueCommissionRoutes = require("./routes/revenueCommission");
 const staffRevenueRoutes = require("./routes/staffRevenue");
 const staffPaymentsRoutes = require("./routes/staffPayments");
-const orderRoutes = require('./routes/order').router;
+const orderRoutes = require("./routes/order");
 const inHouseProductRoutes = require('./routes/inHouseProduct');
+const overallSummaryRoutes = require('./routes/overallSummary');
+const expenseRoutes = require('./routes/expense');
+const VersionControlRoutes = require('./routes/versionControl');
+require("./jobs/expirePackages");
 
 // Connect to MongoDB
 mongoose.connect("mongodb://localhost:27017/salon_admin")
-  .then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.log(err));
+    .then(() => console.log("MongoDB Connected"))
+    .catch((err) => console.log(err));
 
 // mongoose.connect(process.env.MONGO_URI, {
 //     useNewUrlParser: true,
@@ -82,8 +86,9 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({ storage, fileFilter });
 
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
 // Apply routes
-app.use("/uploads", express.static("uploads"));
 app.use("/api/auth", authRoutes);
 app.use("/api/package", packageRoutes);
 app.use("/api/admin", adminRoutes);
@@ -126,6 +131,9 @@ app.use("/api/staff-revenue", staffRevenueRoutes);
 app.use("/api/staff-payouts", staffPaymentsRoutes);
 app.use("/api/order", orderRoutes);
 app.use("/api/in-house-product", inHouseProductRoutes);
+app.use("/api/overall-summary", overallSummaryRoutes);
+app.use("/api/expenses", expenseRoutes);
+app.use("/api/version-control", VersionControlRoutes);
 
 // Start server
 const PORT = 5000;

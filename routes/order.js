@@ -7,6 +7,42 @@ const path = require("path");
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 
+// ----------------- Helper: Transform image into URL --------------------
+function transformImage(doc, type = "salons") {
+  if (!doc) return null;
+  const obj = doc.toObject ? doc.toObject() : doc;
+
+  return {
+    ...obj,
+    image_url: obj.image?.data
+      ? `/api/${type}/image/${obj._id}.${obj.image.extension || "jpg"}`
+      : null,
+    image: undefined // remove raw buffer
+  };
+}
+
+function transformImageLinks(obj) {
+  if (!obj) return obj;
+
+  if (obj.salon_id) obj.salon_id = transformImage(obj.salon_id, "salons");
+  if (obj.branch_id) obj.branch_id = transformImage(obj.branch_id, "branches");
+  if (obj.customer_id) obj.customer_id = transformImage(obj.customer_id, "customers");
+  if (obj.staff_id) obj.staff_id = transformImage(obj.staff_id, "staffs");
+
+  if (obj.products?.length) {
+    obj.products = obj.products.map(p => {
+      if (p.product_id) {
+        return {
+          ...p,
+          product_id: transformImage(p.product_id, "products"),
+        };
+      }
+      return p;
+    });
+  }
+  return obj;
+}
+
 // ----------------- Helper: Generate PDF Invoice --------------------
 function generateOrderInvoicePDF(invoice, order_code) {
   const doc = new PDFDocument({ margin: 50 });
@@ -37,19 +73,16 @@ function generateOrderInvoicePDF(invoice, order_code) {
   doc.font("Helvetica-Bold").text(`Customer: `, { continued: true }).font("Helvetica").text(customer.full_name || customer.name || "-");
   doc.font("Helvetica-Bold").text(`Phone: `, { continued: true }).font("Helvetica").text(customer.phone_number || "-");
 
-  // Optional Date
   if (invoice.date) {
-    const formattedDate = new Date(invoice.date).toLocaleDateString("en-CA"); // YYYY-MM-DD
+    const formattedDate = new Date(invoice.date).toLocaleDateString("en-CA");
     doc.font("Helvetica-Bold").text(`Date: `, { continued: true }).font("Helvetica").text(formattedDate);
   }
 
-  // Generated-Date
   if (invoice.createdAt) {
-    const generatedDate = new Date(invoice.createdAt).toLocaleDateString("en-CA"); // YYYY-MM-DD
+    const generatedDate = new Date(invoice.createdAt).toLocaleDateString("en-CA");
     doc.font("Helvetica-Bold").text(`Generated-Date: `, { continued: true }).font("Helvetica").text(generatedDate);
   }
 
-  // Optional Staff
   if (invoice.staff) {
     doc.font("Helvetica-Bold").text(`Staff: `, { continued: true }).font("Helvetica").text(invoice.staff.full_name || invoice.staff.name || "-");
   }
@@ -100,7 +133,6 @@ function generateOrderInvoicePDF(invoice, order_code) {
     doc.text(`Total Payable: ₹${subtotal.toFixed(2)}`, { align: "right" });
   }
 
-  // Footer
   doc.moveDown(2);
   doc.fontSize(9).font("Helvetica-Oblique").text("Thank you for choosing us!", { align: "center" });
   doc.text("This is a system-generated invoice.", { align: "center" });
@@ -120,25 +152,25 @@ function buildOrderInvoice(order) {
     order_code: order.order_code,
     createdAt: order.createdAt,
     date: order.date || null,
-    salon: order.salon_id,
-    branch: order.branch_id,
-    customer: order.customer_id,
+    salon: transformImage(order.salon_id, "salons"),
+    branch: transformImage(order.branch_id, "branches"),
+    customer: transformImage(order.customer_id, "customers"),
     additional_discount_type: order.additional_discount_type || null,
     additional_discount: order.additional_discount || 0,
     payment_method: order.payment_method,
     total_price: order.total_price,
     products: (order.products || []).map(p => ({
-      product: p.product_id,
+      product: transformImage(p.product_id, "products"),
       variant: p.variant_id,
       quantity: p.quantity,
       unit_price: p.unit_price,
       total_price: p.total_price
     })),
-    ...(order.staff_id ? { staff: order.staff_id } : {})
+    ...(order.staff_id ? { staff: transformImage(order.staff_id, "staffs") } : {})
   };
 }
 
-// POST: Create a new order (buy products)
+// ----------------- POST: Create a new order --------------------
 router.post("/", async (req, res) => {
   try {
     const {
@@ -160,7 +192,6 @@ router.post("/", async (req, res) => {
     let total_price = 0;
     const orderProducts = [];
 
-    // Process each product
     for (const item of products) {
       const { product_id, variant_id, quantity } = item;
       const qty = parseInt(quantity);
@@ -210,7 +241,6 @@ router.post("/", async (req, res) => {
       await product.save();
     }
 
-    // ✅ Apply discount AFTER total_price is known
     let discount = 0;
     if (additional_discount_type === "percentage") {
       discount = total_price * (additional_discount / 100);
@@ -235,7 +265,6 @@ router.post("/", async (req, res) => {
 
     await order.save();
 
-    // Populate references for invoice
     await order.populate([
       { path: "salon_id" },
       { path: "branch_id" },
@@ -245,13 +274,16 @@ router.post("/", async (req, res) => {
       { path: "products.variant_id" }
     ]);
 
+    let orderObj = order.toObject();
+    orderObj = transformImageLinks(orderObj);
+
     const invoice = buildOrderInvoice(order);
     const pdfFileName = await generateOrderInvoicePDF(invoice, order.order_code);
 
     res.status(201).json({
       message: "Order created successfully",
       order_code: order.order_code,
-      order,
+      order: orderObj,
       invoice,
       invoice_pdf_url: `/api/uploads/${pdfFileName}`
     });
@@ -261,17 +293,15 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET: Get all orders (optionally filter by salon_id, customer_id)
+// ----------------- GET: Get all orders --------------------
 router.get("/", async (req, res) => {
   try {
     const { salon_id, customer_id } = req.query;
-
     if (!salon_id) {
       return res.status(400).json({ message: "salon_id is required" });
     }
 
     const filter = { salon_id };
-
     if (customer_id) filter.customer_id = customer_id;
 
     const orders = await Order.find(filter)
@@ -279,28 +309,17 @@ router.get("/", async (req, res) => {
       .populate("products.variant_id")
       .populate("customer_id")
       .populate("branch_id")
-      .populate("staff_id");
+      .populate("staff_id")
+      .populate("salon_id");
 
-    // Add productCount to each order
     const ordersWithProductCount = await Promise.all(orders.map(async order => {
-      const obj = order.toObject();
+      let obj = order.toObject();
       obj.productCount = obj.products ? obj.products.length : 0;
       obj.order_code = order.order_code;
 
-      // Populate for invoice
-      await order.populate([
-        { path: "salon_id" },
-        { path: "branch_id" },
-        { path: "customer_id" },
-        { path: "staff_id" },
-        { path: "products.product_id" },
-        { path: "products.variant_id" }
-      ]);
-
       obj.invoice = buildOrderInvoice(order);
-
-      // Generate PDF for each order (optional: comment out if not needed for all)
       obj.invoice_pdf_url = `/api/uploads/invoice-${order.order_code}.pdf`;
+      obj = transformImageLinks(obj);
       return obj;
     }));
 
@@ -310,20 +329,15 @@ router.get("/", async (req, res) => {
   }
 });
 
-
-// get orders by branch_id
+// ----------------- GET: Get orders by branch --------------------
 router.get("/by-branch", async (req, res) => {
   try {
     const { salon_id, branch_id } = req.query;
-
     if (!salon_id || !branch_id) {
       return res.status(400).json({ messsage: "salon_id and branch_id are required" });
     }
 
-    const filter = {
-      salon_id,
-      branch_id
-    };
+    const filter = { salon_id, branch_id };
 
     const orders = await Order.find(filter)
       .populate("products.product_id")
@@ -334,36 +348,26 @@ router.get("/by-branch", async (req, res) => {
       .populate("staff_id");
 
     const ordersWithInvoices = await Promise.all(orders.map(async order => {
-      const obj = order.toObject();
+      let obj = order.toObject();
       obj.ProductCount = obj.products ? obj.products.length : 0;
       obj.order_code = order.order_code;
 
-      await order.populate([
-        { path: "salon_id" },
-        { path: "branch_id" },
-        { path: "customer_id" },
-        { path: "staff_id" },
-        { path: "products.product_id" },
-        { path: "products.variant_id" },
-      ]);
-
       obj.invoice = buildOrderInvoice(order);
-      obj.invoice_pdf_url = `/api/uploads/invoice=${order.order_code}.pdf`;
+      obj.invoice_pdf_url = `/api/uploads/invoice-${order.order_code}.pdf`;
+      obj = transformImageLinks(obj);
       return obj;
     }));
 
     res.status(200).json({ success: true, data: ordersWithInvoices });
-
   } catch (error) {
     res.status(500).json({ message: "Error fetching orders by branch", error: error.message });
   }
 });
 
-// GET: Get a single order by ID
+// ----------------- GET: Get single order --------------------
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     const order = await Order.findById(id)
       .populate("products.product_id")
       .populate("products.variant_id")
@@ -376,24 +380,16 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Populate for invoice
-    await order.populate([
-      { path: "salon_id" },
-      { path: "branch_id" },
-      { path: "customer_id" },
-      { path: "staff_id" },
-      { path: "products.product_id" },
-      { path: "products.variant_id" }
-    ]);
+    let obj = order.toObject();
+    obj = transformImageLinks(obj);
 
     const invoice = buildOrderInvoice(order);
-
     const pdfFileName = `/api/uploads/invoice-${order.order_code}.pdf`;
 
     res.status(200).json({
       success: true,
       order_code: order.order_code,
-      order,
+      order: obj,
       invoice,
       invoice_pdf_url: pdfFileName
     });
@@ -402,16 +398,15 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// PUT: Update an order by ID
+// ----------------- PUT: Update an order --------------------
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     const { quantity, variant_id } = req.body;
 
     const order = await Order.findById(id);
-
     if (!order) return res.status(404).json({ message: "Order not found" });
+
     if (quantity) {
       const qty = parseInt(quantity);
       if (isNaN(qty) || qty < 1) {
@@ -419,7 +414,6 @@ router.put("/:id", async (req, res) => {
       }
 
       order.quantity = qty;
-      // Recalculate total_price
       let unit_price = order.unit_price;
       if (variant_id) {
         const product = await Product.findById(order.product_id);
@@ -430,7 +424,6 @@ router.put("/:id", async (req, res) => {
         order.variant_id = variant_id;
         order.unit_price = unit_price;
       }
-
       order.total_price = order.unit_price * order.quantity;
     }
 
@@ -444,14 +437,16 @@ router.put("/:id", async (req, res) => {
       { path: "products.variant_id" }
     ]);
 
-    const invoice = buildOrderInvoice(order);
+    let obj = order.toObject();
+    obj = transformImageLinks(obj);
 
+    const invoice = buildOrderInvoice(order);
     const pdfFileName = await generateOrderInvoicePDF(invoice, order.order_code);
 
     res.status(200).json({
       message: "Order updated successfully",
       order_code: order.order_code,
-      order,
+      order: obj,
       invoice,
       invoice_pdf_url: `/api/uploads/${pdfFileName}`
     });
@@ -460,23 +455,16 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE: Delete an order by ID
+// ----------------- DELETE: Delete an order --------------------
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
     const deleted = await Order.findByIdAndDelete(id);
-
     if (!deleted) return res.status(404).json({ message: "Order not found" });
-
     res.status(200).json({ message: "Order deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Error deleting order", error: error.message });
   }
 });
 
-module.exports = {
-  router,
-  buildOrderInvoice,
-  generateOrderInvoicePDF
-};
+module.exports = router;

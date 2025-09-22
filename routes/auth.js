@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const Admin = require("../models/Admin");
 const SuperAdminPackage = require("../models/SuperAdminPackage");
@@ -104,8 +104,11 @@ router.post("/signup", async (req, res) => {
         .json({ message: "Admin with this email or phone number already exists" });
     }
 
+    // ✅ Handle package_id as string or array
+    let selectedPackageId = Array.isArray(package_id) ? package_id[0] : package_id;
+
     // Check package existence
-    const packageExists = await SuperAdminPackage.findById(package_id);
+    const packageExists = await SuperAdminPackage.findById(selectedPackageId);
     if (!packageExists) {
       return res.status(404).json({ message: "Package not found" });
     }
@@ -138,39 +141,65 @@ router.post("/signup", async (req, res) => {
     const password = generateRandomPassword();
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Save admin
+    // Save admin with package history array
     const newAdmin = new Admin({
       full_name,
       phone_number,
       email,
       address,
-      package_id,
       password: hashedPassword,
-      package_start_date: packageStartDate,
-      package_expiration_date: packageExpirationDate,
+      package_id: [
+        {
+          package_id: selectedPackageId,
+          package_start_date: packageStartDate,
+          package_expiration_date: packageExpirationDate,
+          status: 1,
+        },
+      ],
     });
 
     await newAdmin.save();
 
-
-    // Save related salon (do NOT populate address field)
+    // Save related salon (include gst_number and other details)
     const newSalon = new Salon({
-      salon_name: parsedSalonDetails.salon_name,
-      // address field intentionally omitted
-      contact_number: '',
-      contact_email: '',
-      description: '',
-      opening_time: '',
-      closing_time: '',
-      category: 'unisex',
-      package_id,
+      salon_name: parsedSalonDetails.salon_name || "Unnamed Salon",
+      gst_number: parsedSalonDetails.gst_number || "",
+      address: parsedSalonDetails.address || "",
+      contact_number: parsedSalonDetails.contact_number || "",
+      contact_email: parsedSalonDetails.contact_email || "",
+      description: parsedSalonDetails.description || "",
+      opening_time: parsedSalonDetails.opening_time || "",
+      closing_time: parsedSalonDetails.closing_time || "",
+      category: parsedSalonDetails.category || "unisex",
+      status: parsedSalonDetails.status ?? 1,
+      package_id: selectedPackageId,
       signup_id: newAdmin._id,
     });
 
     await newSalon.save();
 
     // Send email
-    const signupMailText = `Hello,\n\nThank you for signing up with ifloriana Booking & Management software. Your account has been successfully created!\n\nHere are your login details:\n🔹 Username/Email: ${email}\n🔹 Password: ${password}\n\nFirst Steps:\n\nLog in here: www.admin.ifloriana.com\n\nChange your password after first login for security.\n\nNeed Help?\nContact our support team at ifloriana2025@gmail.com.\n\nThanks\nTeam IIPL\nIFLORA INFO PVT. LTD.`;
+    const signupMailText = `Hello,
+
+Thank you for signing up with ifloriana Booking & Management software. 
+Your account has been successfully created!
+
+Here are your login details:
+🔹 Username/Email: ${email}
+🔹 Password: ${password}
+
+First Steps:
+Log in here: www.admin.ifloriana.com
+
+Change your password after first login for security.
+
+Need Help?
+Contact our support team at ifloriana2025@gmail.com.
+
+Thanks
+Team IIPL
+IFLORA INFO PVT. LTD.`;
+
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,
@@ -181,36 +210,113 @@ router.post("/signup", async (req, res) => {
     res.status(201).json({
       message: "Admin and salon created successfully",
       admin: newAdmin,
-      salon: newSalon
+      salon: newSalon,
     });
-
   } catch (error) {
     console.error("Signup error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
+// patch request for updating package of admin
+router.patch("/renew-package/:adminId", async (req, res) => {
+  try {
+    const { adminId } = req.params;
+    let { package_id } = req.body;
+
+    if (!package_id) {
+      return res.status(400).json({ message: "Package ID is required" });
+    }
+
+    // ✅ If array, take the first element
+    if (Array.isArray(package_id)) {
+      package_id = package_id[0];
+    }
+
+    // ✅ validate admin
+    const admin = await Admin.findById(adminId);
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    // ✅ validate package
+    const packageExists = await SuperAdminPackage.findById(package_id);
+    if (!packageExists) {
+      return res.status(404).json({ message: "Package not found" });
+    }
+
+    // ✅ calculate new package dates
+    const packageStartDate = new Date();
+    let packageExpirationDate = new Date(packageStartDate);
+
+    switch (packageExists.subscription_plan) {
+      case "15-days":
+        packageExpirationDate.setDate(packageExpirationDate.getDate() + 15);
+        break;
+      case "1-month":
+        packageExpirationDate.setMonth(packageExpirationDate.getMonth() + 1);
+        break;
+      case "3-months":
+        packageExpirationDate.setMonth(packageExpirationDate.getMonth() + 3);
+        break;
+      case "6-months":
+        packageExpirationDate.setMonth(packageExpirationDate.getMonth() + 6);
+        break;
+      case "1-year":
+        packageExpirationDate.setFullYear(packageExpirationDate.getFullYear() + 1);
+        break;
+      default:
+        return res.status(400).json({ message: "Invalid subscription plan" });
+    }
+
+    // ✅ ensure array exists, then push
+    if (!Array.isArray(admin.package_id)) {
+      admin.package_id = [];
+    }
+
+    admin.package_id.push({
+      package_id,
+      package_start_date: packageStartDate,
+      package_expiration_date: packageExpirationDate,
+      status: 1
+    });
+
+    await admin.save();
+
+    res.status(200).json({
+      message: "Package renewed successfully",
+      admin,
+    });
+  } catch (error) {
+    console.error("Renew Package error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
 // Check Admin Package Status
-router.get("/check-package-status", async (req, res) => {
-  const { email } = req.query;
+router.get("/check-package-status/:email", async (req, res) => {
+  const { email } = req.params;
 
   if (!email) {
     return res.status(400).json({ message: "Email is required" });
   }
 
   try {
-    const admin = await Admin.findOne({ email });
+    const admin = await Admin.findOne({ email }).populate("package_id.package_id");
 
     if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    const startDate = admin.package_start_date;
-    const endDate = admin.package_expiration_date;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ message: "Package dates are not available for this admin" });
+    if (!admin.package_id || admin.package_id.length === 0) {
+      return res.status(400).json({ message: "No package history found" });
     }
+
+    // ✅ Always use the latest package entry
+    const latestPackage = admin.package_id[admin.package_id.length - 1];
+
+    const startDate = latestPackage.package_start_date;
+    const endDate = latestPackage.package_expiration_date;
 
     const currentDate = new Date();
     const remainingTime = endDate - currentDate;
@@ -218,6 +324,7 @@ router.get("/check-package-status", async (req, res) => {
 
     res.status(200).json({
       message: "Package status fetched successfully",
+      package: latestPackage.package_id,
       start_date: startDate,
       expiration_date: endDate,
       remaining_days: remainingDays >= 0 ? remainingDays : 0,
@@ -233,7 +340,7 @@ router.get("/check-package-status", async (req, res) => {
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
-  // Log the incoming request body for debugging
+  // Debug log
   console.log("Request body:", req.body);
 
   if (!email || !password) {
@@ -246,15 +353,9 @@ router.post("/login", async (req, res) => {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    // check if package is expired
-    const now = new Date();
-    if (admin.package_expiration_date && now > new Date(admin.package_expiration_date)) {
-      return res.status(403).json({ message: "Your package has expired. Please renew to login." });
-    }
-
     const isMatch = await bcrypt.compare(password, admin.password);
     if (!isMatch) {
-      return res.status(400).json({ message: "Invalid Credentails" });
+      return res.status(400).json({ message: "Invalid Credentials" });
     }
 
     const salon = await Salon.findOne({ signup_id: admin._id });
@@ -264,79 +365,19 @@ router.post("/login", async (req, res) => {
     });
 
     return res.status(201).json({
-      messgae: "Login successful",
+      message: "Login successful",
       token,
       full_name: admin.full_name,
       email: admin.email,
       phone_number: admin.phone_number,
       address: admin.address,
-      package_id: admin.package_id,
+      package_id: admin.package_id, // just returned, no expiry logic
       admin_id: admin._id,
-      salon_id: salon ? salon._id : null
+      salon_id: salon ? salon._id : null,
     });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
-  }
-});
-
-// auto renew admin package
-router.post("/renew-package", async (req, res) => {
-  const { admin_id, package_id } = req.body;
-
-  if (!admin_id || !package_id) {
-    return res.status(400).json({ message: "Admin ID and package ID are required" });
-  }
-
-  try {
-    const admin = await Admin.findById(admin_id);
-    if (!admin) {
-      return res.status(404).json({ message: "Admin not found" });
-    }
-
-    const selectedPackage = await SuperAdminPackage.findById(package_id); // ✅ Correct spelling
-    if (!selectedPackage) {
-      return res.status(404).json({ message: "Package not found" });
-    }
-
-    const now = new Date();
-    let newExpiration = new Date(now);
-
-    switch (selectedPackage.subscription_plan) {
-      case "15-days":
-        newExpiration.setDate(newExpiration.getDate() + 15);
-        break;
-      case "1-month":
-        newExpiration.setMonth(newExpiration.getMonth() + 1);
-        break;
-      case "3-months":
-        newExpiration.setMonth(newExpiration.getMonth() + 3);
-        break;
-      case "6-months":
-        newExpiration.setMonth(newExpiration.getMonth() + 6);
-        break;
-      case "1-year":
-        newExpiration.setFullYear(newExpiration.getFullYear() + 1);
-        break;
-      default:
-        return res.status(400).json({ message: "Invalid subscription plan" });
-    }
-
-    admin.package_id = selectedPackage._id;
-    admin.package_start_date = now;
-    admin.package_expiration_date = newExpiration;
-
-    await admin.save();
-
-    res.status(200).json({
-      message: "Package renewed successfully",
-      admin_id: admin._id,
-      new_package: selectedPackage.package_name,
-      package_expiration_date: admin.package_expiration_date,
-    });
-  } catch (error) {
-    console.error("Error renewing package: ", error);
-    res.status(500).json({ message: "Server error", error: error.message });
   }
 });
 
@@ -376,7 +417,19 @@ router.post("/forgot-password", async (req, res) => {
 
     // Send reset link with token and email as query params
     const resetLink = `http://localhost:5173/password-reset?token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(email)}`;
-    const mailText = `Hello,\n\nYou recently requested to reset your password for your ifloriana booking & management software. If you did not make this request, please ignore this email.\n\nTo reset your password, click the link below:\n\n${resetLink}\n\nFor security reasons, this link will expire in 24 hours. If you need help, contact our support team at ifloriana2025@gmail.com.\n\nThanks,\nTeam IIPL\nIFLORA INFO PVT. LTD.`;
+    const mailText = `Hello,
+
+You recently requested to reset your password for your ifloriana booking & management software. If you did not make this request, please ignore this email.
+
+To reset your password, click the link below:
+
+${resetLink}
+
+For security reasons, this link will expire in 24 hours. If you need help, contact our support team at ifloriana2025@gmail.com.
+
+Thanks,
+Team IIPL
+IFLORA INFO PVT. LTD`;
     await transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: email,

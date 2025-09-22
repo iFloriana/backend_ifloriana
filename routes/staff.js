@@ -3,8 +3,9 @@ const mongoose = require("mongoose");
 const Staff = require("../models/Staff");
 const Service = require("../models/Service");
 const getUploader = require("../middleware/imageUpload");
-const upload = getUploader(); 
+const upload = getUploader();
 const path = require("path");
+const Appointment = require("../models/Appointment");
 
 const router = express.Router();
 
@@ -56,11 +57,11 @@ router.post("/", upload.single("image"), async (req, res) => {
   try {
     const image = req.file
       ? {
-          data: req.file.buffer,
-          contentType: req.file.mimetype,
-          originalName: req.file.originalname,
-          extension: path.extname(req.file.originalname).slice(1),
-        }
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      }
       : undefined;
 
     const newStaff = new Staff({
@@ -95,6 +96,27 @@ router.post("/", upload.single("image"), async (req, res) => {
   }
 });
 
+// ------------------- Get Staff Names -------------------
+router.get("/names", async (req, res) => {
+  const { salon_id } = req.query;
+
+  if (!salon_id) {
+    return res.status(400).json({ message: "salon_id is required" });
+  }
+
+  try {
+    const staffList = await Staff.find({ salon_id }, { _id: 1, full_name: 1 }).lean();
+
+    res.status(200).json({
+      message: "Staff names and IDs fetched successfully",
+      data: staffList,
+    });
+  } catch (error) {
+    console.error("Error fetching staff names:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // ------------------- Get All Staff -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
@@ -110,22 +132,37 @@ router.get("/", async (req, res) => {
       .lean();
 
     const enriched = staff.map((s) => {
+      // ✅ Staff image
       s.image_url = s.image?.data
         ? `/api/staffs/image/${s._id}.${s.image?.extension || "jpg"}`
         : null;
       delete s.image;
 
-      if (s.branch_id && typeof s.branch_id === "object" && s.branch_id !== null) {
+      // ✅ Branch image
+      if (s.branch_id && typeof s.branch_id === "object") {
         s.branch_id.image_url = s.branch_id.image?.data
           ? `/api/branch/image/${s.branch_id._id}.${s.branch_id.image?.extension || "jpg"}`
           : null;
         delete s.branch_id.image;
       }
 
-      if (s.service_id && typeof s.service_id === "object" && s.service_id !== null) {
-        s.service_id.image_url = s.service_id.image?.data
-          ? `/api/services/image/${s.service_id._id}.${s.service_id.image?.extension || "jpg"}`
-          : null;
+      // ✅ Service images (fix for array & single object)
+      if (Array.isArray(s.service_id)) {
+        s.service_id = s.service_id.map((service) => {
+          if (service?.image?.data) {
+            service.image_url = `/api/services/image/${service._id}.${service.image?.extension || "jpg"}`;
+          } else {
+            service.image_url = null;
+          }
+          delete service.image;
+          return service;
+        });
+      } else if (s.service_id && typeof s.service_id === "object") {
+        if (s.service_id.image?.data) {
+          s.service_id.image_url = `/api/services/image/${s.service_id._id}.${s.service_id.image?.extension || "jpg"}`;
+        } else {
+          s.service_id.image_url = null;
+        }
         delete s.service_id.image;
       }
 
@@ -154,22 +191,37 @@ router.get("/by-branch", async (req, res) => {
       .lean();
 
     const enriched = staff.map((s) => {
+      // ✅ Staff image
       s.image_url = s.image?.data
         ? `/api/staffs/image/${s._id}.${s.image?.extension || "jpg"}`
         : null;
       delete s.image;
 
-      if (s.branch_id && typeof s.branch_id === "object" && s.branch_id !== null) {
+      // ✅ Branch image
+      if (s.branch_id && typeof s.branch_id === "object") {
         s.branch_id.image_url = s.branch_id.image?.data
           ? `/api/branch/image/${s.branch_id._id}.${s.branch_id.image?.extension || "jpg"}`
           : null;
         delete s.branch_id.image;
       }
 
-      if (s.service_id && typeof s.service_id === "object" && s.service_id !== null) {
-        s.service_id.image_url = s.service_id.image?.data
-          ? `/api/services/image/${s.service_id._id}.${s.service_id.image?.extension || "jpg"}`
-          : null;
+      // ✅ Service images
+      if (Array.isArray(s.service_id)) {
+        s.service_id = s.service_id.map((service) => {
+          if (service?.image?.data) {
+            service.image_url = `/api/services/image/${service._id}.${service.image?.extension || "jpg"}`;
+          } else {
+            service.image_url = null;
+          }
+          delete service.image;
+          return service;
+        });
+      } else if (s.service_id && typeof s.service_id === "object") {
+        if (s.service_id.image?.data) {
+          s.service_id.image_url = `/api/services/image/${s.service_id._id}.${s.service_id.image?.extension || "jpg"}`;
+        } else {
+          s.service_id.image_url = null;
+        }
         delete s.service_id.image;
       }
 
@@ -183,24 +235,126 @@ router.get("/by-branch", async (req, res) => {
   }
 });
 
-// ------------------- Get Staff Names -------------------
-router.get("/names", async (req, res) => {
-  const { salon_id } = req.query;
-
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
-  }
-
+// GET /performance/:id
+router.get("/performance/:id", async (req, res) => {
   try {
-    const staffList = await Staff.find({ salon_id }, { _id: 1, full_name: 1 }).lean();
+    const { id: staff_id } = req.params;
+    const { salon_id, start_date, end_date } = req.query;
 
+    if (!salon_id) {
+      return res.status(400).json({ message: "salon_id is required" });
+    }
+
+    const mongoose = require("mongoose");
+    if (!mongoose.Types.ObjectId.isValid(staff_id)) {
+      return res.status(400).json({ message: "Invalid staff_id" });
+    }
+
+    // ===== Date filter handling =====
+    const dateFilter = {};
+    if (start_date) {
+      dateFilter.$gte = new Date(start_date);
+    }
+    if (end_date) {
+      dateFilter.$lte = new Date(end_date);
+    }
+
+    // ====== Fetch Appointments (check-out only) ======
+    const appointmentQuery = {
+      salon_id,
+      status: "check-out",
+      "services.staff_id": staff_id
+    };
+    if (Object.keys(dateFilter).length) {
+      appointmentQuery.appointment_date = dateFilter;
+    }
+
+    const appointments = await Appointment.find(appointmentQuery).lean();
+
+    let appointmentCount = 0;
+    let serviceAmount = 0;
+    let productAmountFromAppointments = 0;
+
+    appointments.forEach((apt) => {
+      let involved = false;
+
+      // Services handled by staff
+      (apt.services || []).forEach((srv) => {
+        if (srv.staff_id?.toString() === staff_id.toString()) {
+          serviceAmount += Number(srv.service_amount || 0);
+          involved = true;
+        }
+      });
+
+      // Products sold by staff (inside appointment)
+      (apt.products || []).forEach((prd) => {
+        if (prd.staff_id?.toString() === staff_id.toString()) {
+          productAmountFromAppointments += Number(prd.total_price || 0);
+          involved = true;
+        }
+      });
+
+      if (involved) appointmentCount += 1;
+    });
+
+    // ====== Fetch Orders (standalone) ======
+    const orderQuery = { salon_id, staff_id };
+    if (Object.keys(dateFilter).length) {
+      orderQuery.date = dateFilter;
+    }
+
+    const orders = await require("../models/Order").find(orderQuery).lean();
+    const productAmountFromOrders = orders.reduce(
+      (sum, ord) => sum + (ord.total_price || 0),
+      0
+    );
+
+    // === Commission Calculation (date filtered) ===
+    let commission_earned = 0;
+    const Staff = require("../models/Staff");
+    const RevenueCommission = require("../models/RevenueCommission");
+
+    const staff = await Staff.findOne({ _id: staff_id, salon_id });
+    if (staff) {
+      const commissionId = staff.assigned_commission_id || staff.commission_id;
+      if (commissionId) {
+        const revComm = await RevenueCommission.findById(commissionId);
+        if (revComm && Array.isArray(revComm.commission)) {
+          appointments.forEach((apt) => {
+            apt.services.forEach((srv) => {
+              if (srv.staff_id?.toString() === staff_id.toString()) {
+                const amount = Number(srv.service_amount || 0);
+                const slot = revComm.commission.find((s) => {
+                  const [min, max] = s.slot.split("-").map(Number);
+                  return amount >= min && amount <= max;
+                });
+                if (slot) {
+                  commission_earned +=
+                    revComm.commission_type === "Percentage"
+                      ? (amount * slot.amount) / 100
+                      : slot.amount;
+                }
+              }
+            });
+          });
+          commission_earned = Math.round(commission_earned * 100) / 100;
+        }
+      }
+    }
+
+    // ====== Final Response ======
     res.status(200).json({
-      message: "Staff names and IDs fetched successfully",
-      data: staffList,
+      staff_id,
+      salon_id,
+      appointment_count: appointmentCount,
+      total_service_amount: serviceAmount,
+      total_product_amount:
+        productAmountFromAppointments + productAmountFromOrders,
+      commission_earned: commission_earned,
     });
   } catch (error) {
-    console.error("Error fetching staff names:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error fetching performance report:", error);
+    res.status(500).json({ message: "Server Error", error: error.message });
   }
 });
 
@@ -223,22 +377,37 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Staff not found" });
     }
 
+    // ✅ Staff image
     staff.image_url = staff.image?.data
       ? `/api/staffs/image/${staff._id}.${staff.image?.extension || "jpg"}`
       : null;
     delete staff.image;
 
-    if (staff.branch_id && typeof staff.branch_id === "object" && staff.branch_id !== null) {
+    // ✅ Branch image
+    if (staff.branch_id && typeof staff.branch_id === "object") {
       staff.branch_id.image_url = staff.branch_id.image?.data
         ? `/api/branch/image/${staff.branch_id._id}.${staff.branch_id.image?.extension || "jpg"}`
         : null;
       delete staff.branch_id.image;
     }
 
-    if (staff.service_id && typeof staff.service_id === "object" && staff.service_id !== null) {
-      staff.service_id.image_url = staff.service_id.image?.data
-        ? `/api/services/image/${staff.service_id._id}.${staff.service_id.image?.extension || "jpg"}`
-        : null;
+    // ✅ Service images
+    if (Array.isArray(staff.service_id)) {
+      staff.service_id = staff.service_id.map((service) => {
+        if (service?.image?.data) {
+          service.image_url = `/api/services/image/${service._id}.${service.image?.extension || "jpg"}`;
+        } else {
+          service.image_url = null;
+        }
+        delete service.image;
+        return service;
+      });
+    } else if (staff.service_id && typeof staff.service_id === "object") {
+      if (staff.service_id.image?.data) {
+        staff.service_id.image_url = `/api/services/image/${staff.service_id._id}.${staff.service_id.image?.extension || "jpg"}`;
+      } else {
+        staff.service_id.image_url = null;
+      }
       delete staff.service_id.image;
     }
 

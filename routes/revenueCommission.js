@@ -16,7 +16,7 @@ router.post("/", async (req, res) => {
             salon_id,
             branch_id,
             commission_name,
-            commission_type, 
+            commission_type,
             commission,
         });
 
@@ -25,10 +25,26 @@ router.post("/", async (req, res) => {
     } catch (error) {
         console.error("Error creating revenue commission: ", error);
         res.status(500).json({ message: "Error creating revenue commission", error });
-    } 
+    }
 });
 
-// read all
+// ✅ Helper to format branch image
+function formatBranchWithImageURL(branch) {
+    if (!branch) return null;
+
+    const branchObj = { ...branch };
+
+    branchObj.image_url = branchObj.image?.data
+        ? `/api/branches/image/${branchObj._id}.${branchObj.image?.extension || "jpg"}`
+        : null;
+
+    delete branchObj.image; // remove raw buffer
+    return branchObj;
+}
+
+// ----------------------
+// GET: All Revenue Commissions
+// ----------------------
 router.get("/", async (req, res) => {
     const { salon_id } = req.query;
 
@@ -37,31 +53,44 @@ router.get("/", async (req, res) => {
     }
 
     try {
-        const commission = await RevenueCommission.find({ salon_id }).populate("branch_id");
-        res.status(200).json({ message: "Revenue commissions fetched successfully", data: commission });
+        const commissions = await RevenueCommission.find({ salon_id })
+            .populate({
+                path: "branch_id",
+                select: "_id name image", // ✅ only bring what we need
+            })
+            .lean();
+
+        const data = commissions.map((commission) => ({
+            ...commission,
+            branch_id: Array.isArray(commission.branch_id)
+                ? commission.branch_id.map(formatBranchWithImageURL)
+                : formatBranchWithImageURL(commission.branch_id),
+        }));
+
+        res.status(200).json({ message: "Revenue commissions fetched successfully", data });
     } catch (error) {
         console.error("Error fetching revenue commissions: ", error);
-        res.status(500).json({ message: "Error fetching revenue commissions" , error });
+        res.status(500).json({ message: "Error fetching revenue commissions", error });
     }
 });
 
 router.get("/names", async (req, res) => {
-  const { salon_id } = req.query;
+    const { salon_id } = req.query;
 
-  if (!salon_id) {
-    return res.status(400).json({ message: "salon_id is required" });
-  }
+    if (!salon_id) {
+        return res.status(400).json({ message: "salon_id is required" });
+    }
 
-  if (!mongoose.Types.ObjectId.isValid(salon_id)) {
-    return res.status(400).json({ message: "Invalid salon_id" });
-  }
+    if (!mongoose.Types.ObjectId.isValid(salon_id)) {
+        return res.status(400).json({ message: "Invalid salon_id" });
+    }
 
-  try {
-    const revenueCommissions = await RevenueCommission.find({ salon_id }, { _id: 1, commission_name: 1 });
-    res.status(200).json({ success: true, data: revenueCommissions });
-  } catch (error) {
-    res.status(500).json({ success: false, message: "Failed to fetch revenue commissions", error: error.message });
-  }
+    try {
+        const revenueCommissions = await RevenueCommission.find({ salon_id }, { _id: 1, commission_name: 1 });
+        res.status(200).json({ success: true, data: revenueCommissions });
+    } catch (error) {
+        res.status(500).json({ success: false, message: "Failed to fetch revenue commissions", error: error.message });
+    }
 });
 
 // update

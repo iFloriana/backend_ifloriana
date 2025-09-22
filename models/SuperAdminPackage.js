@@ -9,7 +9,12 @@ const superAdminPackageSchema = new mongoose.Schema({
     },
     subscription_plan: {
         type: String,
-        enum:['15-days', '1-month', '3-months', '6-months', '1-year']
+        enum: ['15-days', '1-month', '3-months', '6-months', '1-year']
+    },
+    status: {
+        type: String,
+        enum: ['active', 'inactive'],
+        default: 'active'
     }
 });
 

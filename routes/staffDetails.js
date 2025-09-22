@@ -42,11 +42,11 @@ router.get("/", async (req, res) => {
             { $match: { status: "check-out" } },
             { $unwind: "$services" },
             { $match: { $expr: { $eq: ["$services.staff_id", "$$staffId"] } } },
-            { 
-              $project: { 
-                service_amount: "$services.service_amount", 
-                service_id: "$services.service_id" 
-              } 
+            {
+              $project: {
+                service_amount: "$services.service_amount",
+                service_id: "$services.service_id"
+              }
             }
           ],
           as: "provided_services"
@@ -57,7 +57,7 @@ router.get("/", async (req, res) => {
           from: "payments",
           let: { staffId: "$_id" },
           pipeline: [
-            { 
+            {
               $lookup: {
                 from: "appointments",
                 localField: "appointment_id",
@@ -67,9 +67,9 @@ router.get("/", async (req, res) => {
             },
             { $unwind: "$appointment" },
             { $unwind: "$appointment.services" },
-            { 
-              $match: { 
-                $expr: { 
+            {
+              $match: {
+                $expr: {
                   $and: [
                     { $eq: ["$appointment.services.staff_id", "$$staffId"] },
                     { $gt: ["$tips", 0] }
@@ -144,7 +144,6 @@ router.get("/", async (req, res) => {
       {
         $project: {
           _id: 1,
-          staff_id: "$_id",
           staff_name: "$full_name",
           staff_image: "$image",
           staff_email: "$email",
@@ -156,7 +155,19 @@ router.get("/", async (req, res) => {
       },
     ]);
 
-    res.status(200).json({ message: "Staff details fetched successfully", data: staffDetails });
+    // ✅ Post-process to replace image with URL
+    const processed = staffDetails.map(staff => {
+      const obj = { ...staff };
+      if (obj.staff_image?.data) {
+        obj.staff_image_url = `/api/staffs/image/${obj._id}.${obj.staff_image.extension || 'jpg'}`;
+      } else {
+        obj.staff_image_url = null;
+      }
+      delete obj.staff_image; // Remove base64
+      return obj;
+    });
+
+    res.status(200).json({ message: "Staff details fetched successfully", data: processed });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });

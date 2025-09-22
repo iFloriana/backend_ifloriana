@@ -31,7 +31,7 @@ const QuickBookingSchema = new mongoose.Schema({
     customer_details: {
         full_name: {
             type: String,
-            required: function() { return !this.customer_id; }
+            required: function () { return !this.customer_id; }
         },
         email: {
             type: String,
@@ -39,12 +39,13 @@ const QuickBookingSchema = new mongoose.Schema({
         },
         phone_number: {
             type: String,
-            required: function() { return !this.customer_id; }
+            required: function () { return !this.customer_id; },
+            unique: true
         },
         gender: {
             type: String,
             enum: ["male", "female", "other"],
-            required: function() { return !this.customer_id; }
+            required: function () { return !this.customer_id; }
         },
     },
     customer_id: {
@@ -66,7 +67,7 @@ const QuickBookingSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 // Ensure at least one of customer_id or customer_details is present
-QuickBookingSchema.pre('validate', function(next) {
+QuickBookingSchema.pre('validate', function (next) {
     if (!this.customer_id && (!this.customer_details || !this.customer_details.full_name || !this.customer_details.phone_number || !this.customer_details.gender)) {
         return next(new Error('Either customer_id or complete customer_details (full_name, phone_number, gender) must be provided.'));
     }

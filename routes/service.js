@@ -54,11 +54,11 @@ router.post("/", upload.single("image"), async (req, res) => {
   try {
     const image = req.file
       ? {
-          data: req.file.buffer,
-          contentType: req.file.mimetype,
-          originalName: req.file.originalname,
-          extension: path.extname(req.file.originalname).slice(1),
-        }
+        data: req.file.buffer,
+        contentType: req.file.mimetype,
+        originalName: req.file.originalname,
+        extension: path.extname(req.file.originalname).slice(1),
+      }
       : undefined;
 
     const newService = new Service({
@@ -144,7 +144,7 @@ router.get("/names", async (req, res) => {
   }
 
   try {
-    const services = await Service.find({ salon_id });
+    const services = await Service.find({ salon_id }).select("_id name");
     res.status(200).json({ success: true, data: services });
   } catch (error) {
     res.status(500).json({ success: false, message: "Failed to fetch services", error: error.message });

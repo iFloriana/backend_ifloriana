@@ -1,6 +1,16 @@
 const mongoose = require("mongoose");
 
 const appointmentSchema = new mongoose.Schema({
+  branch_package: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "CustomerPackage",
+    required: false,
+  },
+  branch_membership: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "CustomerMembership",
+    required: false,
+  },
   salon_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Salon",
@@ -40,7 +50,7 @@ const appointmentSchema = new mongoose.Schema({
         type: Number,
         default: 0
       },
-      used_package: { 
+      used_package: {
         type: Boolean,
         default: false
       },
@@ -73,9 +83,14 @@ const appointmentSchema = new mongoose.Schema({
       total_price: {
         type: Number,
         required: true
+      },
+      staff_id: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Staff",
+        required: false
       }
     }
-  ], 
+  ],
   notes: {
     type: String
   },

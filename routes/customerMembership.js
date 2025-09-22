@@ -1,6 +1,6 @@
 const express = require('express');
 const Customer = require('../models/Customer');
-const BranchMembership = require('../models/branchMembership');
+const BranchMembership = require('../models/BranchMembership');
 const CustomerMembership = require('../models/CustomerMembership');
 const upload = require("../utils/upload");
 const router = express.Router();
@@ -115,7 +115,7 @@ router.get('/', async (req, res) => {
     try {
         const memberships = await CustomerMembership.find({ salon_id })
             .populate('customer_id', 'image full_name email phone_number')
-            .populate('branchMembership_id', 'membership_name subscription_plan membership_amount');
+            .populate({ path: 'branchMembership_id', select: 'membership_name subscription_plan membership_amount', strictPopulate: false });
 
         res.status(200).json({ message: 'Customer Memberships fetched successfully', data: memberships });
     } catch (error) {

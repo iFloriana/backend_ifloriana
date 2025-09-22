@@ -10,7 +10,11 @@ const SalonSchema = new mongoose.Schema({
     contentType: String,
     originalName: String,
     extension: String
-  }, 
+  },
+  gst_number: {
+    type: String,
+    required: false,
+  },
   description: {
     type: String,
     required: false,

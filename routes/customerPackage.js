@@ -4,6 +4,7 @@ const CustomerPackage = require("../models/CustomerPackage");
 
 // Get all customer packages filtered by salon_id with necessary population
 // Updated GET route to include image in customer details
+// ------------------- GET: All Customer Packages -------------------
 router.get("/", async (req, res) => {
   const { salon_id } = req.query;
 
@@ -15,24 +16,49 @@ router.get("/", async (req, res) => {
     const customerPackages = await CustomerPackage.find({ salon_id })
       .populate("customer_id", "full_name email phone_number image")
       .populate("package_details.service_id", "name price")
-      .populate("branch_package_id", "package_name");
+      .populate("branch_package_id", "package_name")
+      .lean();
 
-    res.status(200).json({ success: true, data: customerPackages });
+    const data = customerPackages.map(pkg => {
+      if (pkg.customer_id) {
+        pkg.customer_id.image_url = pkg.customer_id.image?.data
+          ? `/api/customers/image/${pkg.customer_id._id}.${pkg.customer_id.image.extension || "jpg"}`
+          : null;
+
+        delete pkg.customer_id.image; // 🚀 remove buffer
+      }
+      return pkg;
+    });
+
+    res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Error fetching customer packages:", error);
     res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-// Get all packages bought by a customer
+// ------------------- GET: Customer Packages by Customer ID -------------------
 router.get("/by-customer/:customer_id", async (req, res) => {
   try {
     const packages = await CustomerPackage.find({ customer_id: req.params.customer_id })
       .populate("package_details.service_id", "name")
       .populate("branch_id", "name")
-      .populate("branch_package_id", "package_name");
+      .populate("branch_package_id", "package_name")
+      .populate("customer_id", "full_name email phone_number image")
+      .lean();
 
-    res.status(200).json({ success: true, data: packages });
+    const data = packages.map(pkg => {
+      if (pkg.customer_id) {
+        pkg.customer_id.image_url = pkg.customer_id.image?.data
+          ? `/api/customers/image/${pkg.customer_id._id}.${pkg.customer_id.image.extension || "jpg"}`
+          : null;
+
+        delete pkg.customer_id.image; // 🚀 remove buffer
+      }
+      return pkg;
+    });
+
+    res.status(200).json({ success: true, data });
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, message: "Server error" });

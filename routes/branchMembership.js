@@ -1,18 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const BranchMembership = require('../models/branchMembership');
+const BranchMembership = require('../models/BranchMembership');
 
 // create Branch Membership
-router.post('/', async(req, res) => {
+router.post('/', async (req, res) => {
     const {
-        salon_id, 
+        salon_id,
         membership_name,
         description,
         subscription_plan,
         status,
         discount,
         discount_type,
-        membership_amount, 
+        membership_amount,
     } = req.body;
 
     if (!salon_id) {
@@ -26,7 +26,7 @@ router.post('/', async(req, res) => {
             description,
             subscription_plan,
             status,
-            discount, 
+            discount,
             discount_type,
             membership_amount,
         });
@@ -38,7 +38,7 @@ router.post('/', async(req, res) => {
     }
 });
 
-// get all branch memberships
+// ------------------- GET: All Branch Memberships -------------------
 router.get('/', async (req, res) => {
     const { salon_id } = req.query;
 
@@ -47,15 +47,33 @@ router.get('/', async (req, res) => {
     }
 
     try {
-        const branchMembership = await BranchMembership.find({ salon_id }).populate('salon_id');
-        res.status(200).json({ message: "Salon membership fetched successfully", data: branchMembership });
+        const branchMemberships = await BranchMembership.find({ salon_id }).populate('salon_id');
+
+        const data = branchMemberships.map(membership => {
+            const obj = membership.toObject();
+
+            // ✅ Fix salon image
+            if (obj.salon_id) {
+                obj.salon_id = {
+                    ...obj.salon_id,
+                    image_url: obj.salon_id.image?.data
+                        ? `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`
+                        : null,
+                };
+                delete obj.salon_id.image;
+            }
+
+            return obj;
+        });
+
+        res.status(200).json({ message: "Salon membership fetched successfully", data });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
     }
 });
 
-// Create a route to fetch membership names and IDs
+// ------------------- GET: Membership Names & IDs -------------------
 router.get('/names', async (req, res) => {
     try {
         const memberships = await BranchMembership.find({}, 'membership_name _id');
@@ -66,7 +84,7 @@ router.get('/names', async (req, res) => {
     }
 });
 
-// get single branch membership
+// ------------------- GET: Single Branch Membership -------------------
 router.get('/:id', async (req, res) => {
     const { id } = req.params;
     const { salon_id } = req.query;
@@ -80,13 +98,26 @@ router.get('/:id', async (req, res) => {
         if (!branchMembership) {
             return res.status(404).json({ message: "Salon membership not found" });
         }
-        res.status(200).json({ message: "Salon membership fetched successfully", data: branchMembership });
+
+        const obj = branchMembership.toObject();
+
+        // ✅ Fix salon image
+        if (obj.salon_id) {
+            obj.salon_id = {
+                ...obj.salon_id,
+                image_url: obj.salon_id.image?.data
+                    ? `/api/salons/image/${obj.salon_id._id}.${obj.salon_id.image.extension || "jpg"}`
+                    : null,
+            };
+            delete obj.salon_id.image;
+        }
+
+        res.status(200).json({ message: "Salon membership fetched successfully", data: obj });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
     }
 });
-
 
 // update branch membership
 router.put('/:id', async (req, res) => {

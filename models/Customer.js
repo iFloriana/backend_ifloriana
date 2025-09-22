@@ -13,11 +13,10 @@ const CustomerSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: false,
     unique: true,
     sparse: true,
     default: undefined,
-    set: v => (v === '' ? undefined : v)
+    set: v => (v === '' ? undefined : v),
   },
   phone_number: {
     type: String,
@@ -33,37 +32,40 @@ const CustomerSchema = new mongoose.Schema({
     ref: "Salon",
     required: true,
   },
-  branch_package: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "BranchPackage",
-    required: false,
-  }],
-  branch_membership: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "BranchMembership",
-    required: false,
-  },
+
+  // unified structure for package + membership history
+  package_and_membership: [
+    {
+      branch_package: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "BranchPackage",
+      },
+      branch_membership: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "BranchMembership",
+      },
+      payment_method: {
+        type: String,
+        enum: ["Cash", "Card", "UPI", "Split"],
+      },
+      date: {
+        type: Date,
+        default: Date.now
+      }
+    }
+  ],
+
   status: {
     type: Number,
     enum: [0, 1],
     default: 1,
   },
-  branch_package_valid_till: {
-    type: Date,
-  },
-
-  branch_membership_valid_till: {
-    type: Date,
-  },
-
-  branch_package_bought_at: {
-    type: Date,
-  },
-
-  branch_membership_bought_at: {
-    type: Date,
-  },
-
+  payment_split: [
+    {
+      method: { type: String, enum: ["cash", "card", "upi"] },
+      amount: { type: Number },
+    },
+  ],
 }, { timestamps: true });
 
 module.exports = mongoose.model("Customer", CustomerSchema);

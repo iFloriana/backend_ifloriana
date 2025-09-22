@@ -1,5 +1,5 @@
 const express = require("express");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const SuperAdmin = require("../models/SuperAdmin");
 const router = express.Router();
@@ -14,12 +14,12 @@ router.post("/register", async (req, res) => {
     await newSuperAdmin.save();
 
     res.status(201).json({
-        message: "SuperAdmin registered successfully",
-        superAdmin: {
-            _id: newSuperAdmin._id, // Include the ID
-            name: newSuperAdmin.name,
-            email: newSuperAdmin.email
-        }
+      message: "SuperAdmin registered successfully",
+      superAdmin: {
+        _id: newSuperAdmin._id, // Include the ID
+        name: newSuperAdmin.name,
+        email: newSuperAdmin.email
+      }
     });
   } catch (error) {
     console.error(error);

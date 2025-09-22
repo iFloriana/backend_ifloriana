@@ -19,7 +19,7 @@ const ProductSchema = new mongoose.Schema({
     required: true,
   },
   description: {
-    type: String, 
+    type: String,
     required: true,
   },
   brand_id: {
@@ -72,7 +72,7 @@ const ProductSchema = new mongoose.Schema({
     {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Variation",
-      required: false 
+      required: false
     }
   ],
   variants: [
@@ -88,7 +88,7 @@ const ProductSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Salon",
     required: true,
-  },  
+  },
 }, { timestamps: true, strict: false });
 
 module.exports = mongoose.model("Product", ProductSchema);
